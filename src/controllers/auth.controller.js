@@ -913,10 +913,10 @@ const preferenceData = {
   },
   auto_return: 'approved',
 };
-
+let linkPagamento;
 try {
   const mpResponse = await preference.create({ body: preferenceData });
-  const linkPagamento = mpResponse.init_point;
+   linkPagamento = mpResponse.init_point;
 
   // Atualiza os dados do participante
   dadosParticipante.valor = valor;
@@ -1063,8 +1063,8 @@ const gerarNovoLinkPagamento = async (id) => {
     participanteId: participante?.id || id,
   },
       payment_methods: {
-        excluded_payment_methods: [{ id: 'ticket' }, { id: 'atm' }],
-        excluded_payment_types: [{ id: 'ticket' }],
+        excluded_payment_methods: [], // Não excluir nada por enquanto
+
         installments: 1,
       },
       notification_url: `${process.env.BASE_URL}/api/auth/mercadopago/notificacao`,
