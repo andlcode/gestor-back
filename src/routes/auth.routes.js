@@ -20,7 +20,9 @@ const {
   notificacao,
   AtualizarpaymentId,
   atualizarPerfil,
-  updateInscricao
+  updateInscricao,
+  changePassword,
+  gerarNovoLinkPagamento
 } = require('../controllers/auth.controller.js');
 
 const {
@@ -30,7 +32,7 @@ const {
 } = require('../../validators/authValidator.js');
 
 const { isAdmin } = require('../middlewares/isAdmin.js');
-
+const { verifyToken } = require('../middlewares/isVerify.js');
 const router = express.Router();
 
 
@@ -64,8 +66,24 @@ router.put('/updateProfile/:id', isAuthenticated, isAdmin, updateProfile)
 router.put('/pagamentos/:id/status', isAuthenticated, isAdmin, AtualizarpaymentId);
 router.put('/atualizarPerfil/', isAuthenticated, atualizarPerfil)
 router.put('/participante/:id', isAuthenticated, updateInscricao);
-
 router.post('/forgot-password', forgotPassword);
+router.post('/administrator-senha', verifyToken, isAdmin, changePassword);
+router.post('/novo-link', isAuthenticated, async (req, res) => {
+  const { id } = req.body;
+
+  if (!id) {
+    return res.status(400).json({ success: false, message: 'ID do participante não fornecido.' });
+  }
+
+  const resultado = await gerarNovoLinkPagamento(id);
+
+  if (resultado.success) {
+    res.status(200).json(resultado);
+  } else {
+    res.status(500).json(resultado);
+  }
+});
+
 router.post('/recuperarsenha', resetPassword);
 // Middleware de tratamento de erros global
 router.use((err, req, res, next) => {

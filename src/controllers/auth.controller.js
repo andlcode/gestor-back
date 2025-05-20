@@ -10,7 +10,8 @@ const { PrismaClient, Prisma } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 dotenv.config();
-
+const BASE_URL = process.env.BASE_URL;
+const FRONTEND_URL = process.env.FRONTEND_URL;
 
 // Constantes atualizadas para mensagens
 const MESSAGES = {
@@ -545,6 +546,51 @@ const RESEND_INTERVAL = 60000; // 60 segundos
     });
   }
 };
+const changePassword = async (req, res) => {
+  const { email, newPassword } = req.body;
+
+  // Verificação de permissão
+  const requestingUser = req.user; // Deve vir do middleware de autenticação
+
+  if (!requestingUser || requestingUser.role !== 'admin') {
+    return res.status(403).json({ error: "Acesso negado. Apenas administradores podem alterar senhas." });
+  }
+
+  const isStrongPassword = (password) => {
+    const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&.])[A-Za-z\d@$!%*?&.]{8,}$/;
+    return regex.test(password);
+  };
+
+  try {
+    if (!email || !newPassword) {
+      return res.status(400).json({ error: "E-mail e nova senha são obrigatórios." });
+    }
+
+    if (!isStrongPassword(newPassword)) {
+      return res.status(400).json({
+        error: "A nova senha deve conter pelo menos 8 caracteres, incluindo uma letra maiúscula, uma minúscula, um número e um caractere especial."
+      });
+    }
+
+    const user = await prisma.users.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(404).json({ error: "Usuário não encontrado." });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await prisma.users.update({
+      where: { email },
+      data: { password: hashedPassword }
+    });
+
+    return res.status(200).json({ message: "Senha alterada com sucesso." });
+
+  } catch (error) {
+    console.error("Erro ao alterar senha:", error);
+    return res.status(500).json({ error: "Erro interno ao tentar alterar a senha." });
+  }
+};
 
  const login = async (req, res) => {
   const { email, password } = req.body;
@@ -826,16 +872,13 @@ dadosParticipante.cep = req.body.cep && typeof req.body.cep === 'string' ? req.b
 
     // Calcular idade
     const idade = calcularIdade(dadosParticipante.dataNascimento);
+const valor = idade < 11 ? 45 : 60;
+const { email, nomeCompleto, id } = req.body;
 
-    // Definir valor da inscrição
-    const valor = idade < 11 ? 45 : 60;
+if (!process.env.MERCADOPAGO_ACCESS_TOKEN) {
+  throw new Error('Mercado Pago Access Token não configurado');
+}
 
-    const { email, nomeCompleto, id } = req.body;
-
-    // Criar preferência de pagamento com o Mercado Pago
-    const BASE_URL = process.env.BASE_URL || 'http://localhost:4000';
-    const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
-  
 const client = new mercadopago.MercadoPagoConfig({
   accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN,
 });
@@ -847,29 +890,21 @@ const preferenceData = {
       title: 'COMEJACA | INSCRIÇÃO',
       quantity: 1,
       currency_id: 'BRL',
-      unit_price: Number(valor),
+      unit_price: valor,
     },
   ],
   payer: {
-    email: email,
+    email,
     name: nomeCompleto,
-
-     },
-
-     metadata: {
-       participanteId:  dadosParticipante.id
-    },
-     payment_methods: {
-  
-      excluded_payment_methods: [
-        { id: 'ticket' }, 
-        { id: 'atm' }   
-      ],
-      excluded_payment_types: [
-        { id: 'ticket' }
-      ], 
-      installments: 1, 
-    },
+  },
+  metadata: {
+    participanteId: dadosParticipante?.id || id,
+  },
+  payment_methods: {
+    excluded_payment_methods: [{ id: 'ticket' }, { id: 'atm' }],
+    excluded_payment_types: [{ id: 'ticket' }],
+    installments: 1,
+  },
   notification_url: `${BASE_URL}/api/auth/mercadopago/notificacao`,
   back_urls: {
     success: `${FRONTEND_URL}/sucesso`,
@@ -879,15 +914,21 @@ const preferenceData = {
   auto_return: 'approved',
 };
 
+try {
+  const mpResponse = await preference.create({ body: preferenceData });
+  const linkPagamento = mpResponse.init_point;
 
+  // Atualiza os dados do participante
+  dadosParticipante.valor = valor;
+  dadosParticipante.linkPagamento = linkPagamento;
+  dadosParticipante.statusPagamento = 'pendente';
 
-    try {
-      // Criar link de pagamento
-      const mpResponse = await preference.create({ body: preferenceData });
+  // Retorne ou salve os dados conforme necessário
+} catch (error) {
+  console.error('Erro ao criar preferência do Mercado Pago:', error);
+  res.status(500).json({ error: 'Erro ao gerar link de pagamento' });
+}
 
-      const linkPagamento = mpResponse.init_point;
-      console.log('mpResponse:', mpResponse);
-      console.log('Link de pagamento:', mpResponse.init_point); 
    
     
       // Anexar dados de pagamento ao participante
@@ -957,12 +998,110 @@ const preferenceData = {
         details: paymentError.message,
       });
     }
-  } catch (err) {
-    console.error('Erro ao processar participante:', err);
-    return res.status(500).json({
-      error: MESSAGES.errors.internalError,
-      details: err.message,
+  }
+
+// Inicialize o Mercado Pago apenas uma vez
+const client = new mercadopago.MercadoPagoConfig({
+  accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN,
+});
+const preference = new mercadopago.Preference(client);
+
+const gerarNovoLinkPagamento = async (id) => {
+  try {
+    if (!process.env.MERCADOPAGO_ACCESS_TOKEN) {
+      throw new Error('Mercado Pago Access Token não configurado');
+    }
+
+    const participante = await prisma.participante2025.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        dataNascimento: true,
+        email: true,
+        nomeCompleto: true,
+      },
     });
+
+    if (!participante) {
+      throw new Error('Participante não encontrado para esse ID.');
+    }
+
+    const { email, nomeCompleto, dataNascimento } = participante;
+
+    if (!email || !nomeCompleto || !dataNascimento) {
+      throw new Error('Dados do participante incompletos.');
+    }
+
+    const calcularIdade = (dataNascimento) => {
+      const hoje = new Date();
+      const nascimento = new Date(dataNascimento);
+      let idade = hoje.getFullYear() - nascimento.getFullYear();
+      const m = hoje.getMonth() - nascimento.getMonth();
+      if (m < 0 || (m === 0 && hoje.getDate() < nascimento.getDate())) {
+        idade--;
+      }
+      return idade;
+    };
+
+    const idade = calcularIdade(dataNascimento);
+    const valor = idade < 11 ? 45 : 60;
+
+    const preferenceData = {
+      items: [
+        {
+          title: 'COMEJACA | INSCRIÇÃO',
+          quantity: 1,
+          currency_id: 'BRL',
+          unit_price: valor,
+        },
+      ],
+      payer: {
+        email,
+        name: nomeCompleto,
+      },
+        metadata: {
+    participanteId: participante?.id || id,
+  },
+      payment_methods: {
+        excluded_payment_methods: [{ id: 'ticket' }, { id: 'atm' }],
+        excluded_payment_types: [{ id: 'ticket' }],
+        installments: 1,
+      },
+      notification_url: `${process.env.BASE_URL}/api/auth/mercadopago/notificacao`,
+   back_urls: {
+  success: 'https://comejaca.org/sucesso',
+  failure: 'https://comejaca.org/falha',
+  pending: 'https://comejaca.org/pendente',
+  },
+      auto_return: 'approved',
+    };
+
+    const mpResponse = await preference.create({ body: preferenceData });
+
+    if (!mpResponse || !mpResponse.init_point) {
+      throw new Error('Falha ao gerar o link de pagamento.');
+    }
+
+    const participanteAtualizado = await prisma.participante2025.update({
+      where: { id: participante.id },
+      data: {
+        linkPagamento: mpResponse.init_point,
+        statusPagamento: 'pendente',
+        valor,
+      },
+    });
+
+    return {
+      success: true,
+      linkPagamento: mpResponse.init_point,
+      participante: participanteAtualizado,
+    };
+  } catch (error) {
+    console.error('Erro ao gerar novo link de pagamento:', error);
+    return {
+      success: false,
+      message: error.message || 'Erro desconhecido',
+    };
   }
 };
 
@@ -1793,4 +1932,4 @@ const atualizarPerfil = async (req, res) => {
 
 
   
-  module.exports = { esquecisenha, obterInscricao, getProfile, updateProfile, atualizarInstituicao, listarInstituicoes, criarInstituicao, getparticipantes, participante,resendVerificationCode, login, register, validateToken,verificar, paymentId,resetPassword, forgotPassword,listarParticipantes, notificacao, AtualizarpaymentId, atualizarPerfil, updateInscricao}
+  module.exports = { changePassword,esquecisenha, obterInscricao, getProfile, updateProfile, atualizarInstituicao, listarInstituicoes, criarInstituicao, getparticipantes, participante,resendVerificationCode, login, register, validateToken,verificar, paymentId,resetPassword, forgotPassword,listarParticipantes, notificacao, AtualizarpaymentId, atualizarPerfil, updateInscricao, gerarNovoLinkPagamento}
