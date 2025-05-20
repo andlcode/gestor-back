@@ -928,6 +928,7 @@ try {
   console.error('Erro ao criar preferência do Mercado Pago:', error);
   res.status(500).json({ error: 'Erro ao gerar link de pagamento' });
 }
+console.log('Resposta do MercadoPago:', mpResponse); // ERRO: mpResponse não está definida aqui
 
    
     
