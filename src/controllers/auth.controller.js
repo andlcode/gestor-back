@@ -45,6 +45,8 @@ const MESSAGES = {
 // Configurações
 const CODE_EXPIRATION_TIME = 15 * 60 * 1000; // 15 minutos
 const RESEND_INTERVAL = 60000; // 60 segundos
+
+
  const newAccountEmail = async (name, email, code) => {
   try {
     await transporter.sendMail({
@@ -1151,6 +1153,7 @@ const updateInscricao = async (req, res) => {
         nomeCompleto: true,
         IE: true,
         createdAt: true,
+        tipoParticipacao: true
       }
     });
 
@@ -1760,6 +1763,7 @@ const updateInscricao = async (req, res) => {
           IE: true,
           statusPagamento: true,
           linkPagamento: true,
+          tipoParticipacao:true
         },
       });
   
@@ -1887,5 +1891,95 @@ const atualizarPerfil = async (req, res) => {
 };
 
 
+// Função que envia o e-mail com o arquivo
+const enviarEmailComArquivo = async (nomeCompleto, email, arquivo) => {
+  console.log('Arquivo recebido:', arquivo);
+  try {
+    await transporter.sendMail({
+      from: `"COMEJACA" <${process.env.MAIL_USER}>`,
+      to: [email, 'and969696@outlook.com'],
+      subject: `Pagamento de ${nomeCompleto} confirmado`,
+      html: `
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>Pagamento confirmado</title>
+          <style>
+            body {
+              font-family: 'Arial', sans-serif;
+              margin: 0;
+              padding: 30px 0;
+              background-color: #22223b;
+            }
+            .container {
+              max-width: 680px;
+              margin: 0 auto;
+              background-color: #ffffff;
+              border-radius: 8px;
+              box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            }
+            .header {
+              padding: 40px 30px 20px;
+              border-bottom: 1px solid #e9ecef;
+              text-align: center;
+            }
+            .header img {
+              height: 40px;
+            }
+            .content {
+              padding: 40px 30px;
+              color: #4a4e69;
+            }
+            a {
+              color: #2b6cb0 !important;
+              text-decoration: none !important;
+            }
+            .footer {
+              padding: 25px 30px;
+              background-color: #f8f9fa;
+              text-align: center;
+              font-size: 14px;
+              color: #6c757d;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <img src="https://i.postimg.cc/CxwC6HnL/favicon.png" alt="Logo COMEJACA" />
+            </div>
+            <div class="content">
+              <p>Prezado(a) ${nomeCompleto},</p>
+              <p>Recebemos e confirmamos o seu pagamento.</p>
+              <p>Verifique no anexo o comprovante correspondente.</p>
+              <p>Obrigado por sua participação!<br />Equipe COMEJACA</p>
+            </div>
+            <div class="footer">
+              <p>Esta é uma mensagem automática. Por favor não responda este e-mail.</p>
+              <p>Dúvidas? Contate-nos: suporte@comejaca.org.br </p>
+              <p>© ${new Date().getFullYear()} COMEJACA Gestão. Todos os direitos reservados.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      attachments: [
+        {
+          filename: arquivo.originalname,
+          path: arquivo.path,
+        },
+      ],
+    });
+
+    console.log(`✅ E-mail de comprovante enviado para: ${email}`);
+  } catch (error) {
+    console.error('❌ Erro ao enviar comprovante:', error);
+    throw new Error('Falha no envio do e-mail de comprovante');
+  }
+};
+
+
   
-  module.exports = { changePassword,esquecisenha, obterInscricao, getProfile, updateProfile, atualizarInstituicao, listarInstituicoes, criarInstituicao, getparticipantes, participante,resendVerificationCode, login, register, validateToken,verificar, paymentId,resetPassword, forgotPassword,listarParticipantes, notificacao, AtualizarpaymentId, atualizarPerfil, updateInscricao, gerarNovoLinkPagamento}
+  module.exports = { changePassword,esquecisenha, obterInscricao, getProfile, updateProfile, atualizarInstituicao, listarInstituicoes, criarInstituicao, getparticipantes, participante,resendVerificationCode, login, register, validateToken,verificar, paymentId,resetPassword, forgotPassword,listarParticipantes, notificacao, AtualizarpaymentId, atualizarPerfil, updateInscricao, gerarNovoLinkPagamento, enviarEmailComArquivo}

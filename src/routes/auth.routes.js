@@ -22,9 +22,10 @@ const {
   atualizarPerfil,
   updateInscricao,
   changePassword,
-  gerarNovoLinkPagamento
+  gerarNovoLinkPagamento,
+  enviarEmailComArquivo
 } = require('../controllers/auth.controller.js');
-
+const upload = require('../config/upload');
 const {
   validateLogin,
   validateRegister,
@@ -91,6 +92,34 @@ router.use((err, req, res, next) => {
   res.status(500).json({ error: 'Erro interno do servidor' });
 });
 
+const fs = require('fs');
+
+
+// Endpoint para receber o POST com nome, email e arquivo
+router.post('/enviar-comprovante', upload.single('arquivo'), async (req, res) => {
+  const { nomeCompleto, email } = req.body;
+  const arquivo = req.file;
+
+  if (!nomeCompleto || !email || !arquivo) {
+    return res.status(400).json({ erro: 'Nome completo, email e arquivo são obrigatórios.' });
+  }
+
+  try {
+    await enviarEmailComArquivo(nomeCompleto, email, arquivo);
+    res.status(200).json({ mensagem: 'Comprovante enviado com sucesso!' });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  } finally {
+    // Remove o arquivo temporário após enviar o email, evita acúmulo no servidor
+    fs.unlink(arquivo.path, (err) => {
+      if (err) {
+        console.error('Erro ao remover arquivo temporário:', err);
+      } else {
+        console.log('Arquivo temporário removido:', arquivo.path);
+      }
+    });
+  }
+});
 
 
 module.exports = router;
