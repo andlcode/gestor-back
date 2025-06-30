@@ -1783,6 +1783,43 @@ const updateInscricao = async (req, res) => {
     }
   };
 
+const atendimentoFraterno = async (req, res) => {
+  try {
+    const participantes = await prisma.participante2025.findMany({
+      orderBy: {
+        nomeCompleto: 'asc',
+      },
+      select: {
+        id: true,
+        nomeCompleto: true,
+        tipoParticipacao: true,
+        deficienciaAuditiva: true,
+        deficienciaAutismo: true,
+        deficienciaIntelectual: true,
+        deficienciaParalisiaCerebral: true,
+        deficienciaVisual: true,
+        deficienciaFisica: true,
+        deficienciaOutra: true,
+        deficienciaOutraDescricao: true,
+        medicacao: true,
+        alergia: true,
+        outrasInformacoes: true,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      total: participantes.length,
+      data: participantes,
+    });
+  } catch (error) {
+    console.error('Erro ao listar participantes:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Erro ao buscar os participantes.',
+    });
+  }
+};
 
   const notificacao = async (req, res) => {
     try {
@@ -1985,4 +2022,5 @@ const enviarEmailComArquivo = async (nomeCompleto, email, arquivo) => {
 
 
   
-  module.exports = { changePassword,esquecisenha, obterInscricao, getProfile, updateProfile, atualizarInstituicao, listarInstituicoes, criarInstituicao, getparticipantes, participante,resendVerificationCode, login, register, validateToken,verificar, paymentId,resetPassword, forgotPassword,listarParticipantes, notificacao, AtualizarpaymentId, atualizarPerfil, updateInscricao, gerarNovoLinkPagamento, enviarEmailComArquivo}
+
+  module.exports = { changePassword,esquecisenha, obterInscricao, getProfile, updateProfile, atualizarInstituicao, listarInstituicoes, criarInstituicao, getparticipantes, participante,resendVerificationCode, login, register, validateToken,verificar, paymentId,resetPassword, forgotPassword,listarParticipantes, notificacao, AtualizarpaymentId, atualizarPerfil, atendimentoFraterno, updateInscricao, gerarNovoLinkPagamento, enviarEmailComArquivo}
