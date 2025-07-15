@@ -1766,6 +1766,7 @@ const updateInscricao = async (req, res) => {
           tipoParticipacao:true, 
           comissao: true,
           dataNascimento: true,
+          IE: true
 
         },
       });
