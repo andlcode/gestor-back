@@ -24,6 +24,8 @@ const {
   changePassword,
   gerarNovoLinkPagamento,
   enviarEmailComArquivo,
+    enviarEmailRedefinicao,
+
   atendimentoFraterno
 } = require('../controllers/auth.controller.js');
 const upload = require('../config/upload');
@@ -68,9 +70,10 @@ router.put('/updateProfile/:id', isAuthenticated, isAdmin, updateProfile)
 router.put('/pagamentos/:id/status', isAuthenticated, isAdmin, AtualizarpaymentId);
 router.put('/atualizarPerfil/', isAuthenticated, atualizarPerfil)
 router.put('/participante/:id', isAuthenticated, updateInscricao);
-router.post('/forgot-password', forgotPassword);
 router.post('/administrator-senha', verifyToken, isAdmin, changePassword);
 router.get('/atendimentofraterno', verifyToken, isAdmin, atendimentoFraterno);
+router.post('/forgot-password', enviarEmailRedefinicao);
+router.post('/reset-password',  resetPassword);
 router.post('/novo-link', isAuthenticated, async (req, res) => {
   const { id } = req.body;
 
