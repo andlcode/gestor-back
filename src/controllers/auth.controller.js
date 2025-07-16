@@ -1412,92 +1412,101 @@ const updateInscricao = async (req, res) => {
     }
   };
   
- const obterInscricao = async (req, res) => {
-    const userId = req.userId; // Obtém o ID do usuário autenticado
-    const { participanteId } = req.params; // Obtém o ID do participante da URL
-  
-    try {
-      // Verifica se o usuário existe e está verificado
-      const usuario = await prisma.users.findUnique({
-        where: { id: userId },
-        select: { id: true, isVerified: true }
-      });
-  
-      if (!usuario) {
-        return res.status(404).json({ error: MESSAGES.errors.userNotFound });
-      }
-      if (!usuario.isVerified) {
-        return res.status(403).json({ error: MESSAGES.errors.unverifiedUser });
-      }
-  
-      const inscricao = await prisma.participante2025.findUnique({
-        where: { id: participanteId, userId },
-        select: {
-          id: true,
-          nomeCompleto: true,
-          nomeSocial: true,
-          dataNascimento: true,
-          sexo: true,
-          email: true,
-          telefone: true,
-          tipoParticipacao: true,
-          nomeCompletoResponsavel: true,
-          documentoResponsavel: true,
-          telefoneResponsavel: true,
-          comissao: true,
-          camisa: true,
-          tamanhoCamisa: true,
-          cep: true,
-          estado: true,
-          cidade: true,
-          bairro: true,
-          logradouro: true,
-          numero: true,
-          complemento: true,
-          medicacao: true,
-          alergia: true,
-          vegetariano: true,
-          outrasInformacoes: true,
-          IE: true,
-          outroGenero: true,
-          otherInstitution: true,
-          primeiraComejaca: true,
-          deficienciaAuditiva: true,
-          deficienciaAutismo: true,
-          deficienciaIntelectual: true,
-          deficienciaParalisiaCerebral: true,
-          deficienciaVisual: true,
-          deficienciaFisica: true,
-          deficienciaOutra: true,
-          deficienciaOutraDescricao: true,
-          statusPagamento: true,
-          userId: true,
-          createdAt: true,
-          updatedAt: true
-        }
-      });
-      
-  
-      // Se não encontrar a inscrição, retorna erro
-      if (!inscricao) {
-        return res.status(404).json({ error: MESSAGES.errors.registrationNotFound });
-      }
-  
-      return res.status(200).json({
-        success: true,
-        message: "Dados da inscrição encontrados com sucesso!",
-        data: inscricao
-      });
-  
-    } catch (error) {
-      console.error("Erro ao buscar inscrição:", error);
-      
-      return res.status(500).json({
-        error: MESSAGES.errors.internalError,
-        details: process.env.NODE_ENV === "development" ? error.message : undefined
-      });
+const obterInscricao = async (req, res) => {
+  const userId = req.userId;
+  const { participanteId } = req.params;
+
+  try {
+    // Verifica se o usuário existe e está verificado
+    const usuario = await prisma.users.findUnique({
+      where: { id: userId },
+      select: { id: true, isVerified: true, role: true }
+    });
+
+    if (!usuario) {
+      return res.status(404).json({ error: MESSAGES.errors.userNotFound });
     }
-  };
+
+    if (!usuario.isVerified) {
+      return res.status(403).json({ error: MESSAGES.errors.unverifiedUser });
+    }
+
+    // Busca a inscrição pelo participanteId
+    const inscricao = await prisma.participante2025.findUnique({
+      where: { id: participanteId },
+      select: {
+        id: true,
+        nomeCompleto: true,
+        nomeSocial: true,
+        dataNascimento: true,
+        sexo: true,
+        email: true,
+        telefone: true,
+        tipoParticipacao: true,
+        nomeCompletoResponsavel: true,
+        documentoResponsavel: true,
+        telefoneResponsavel: true,
+        comissao: true,
+        camisa: true,
+        tamanhoCamisa: true,
+        cep: true,
+        estado: true,
+        cidade: true,
+        bairro: true,
+        logradouro: true,
+        numero: true,
+        complemento: true,
+        medicacao: true,
+        alergia: true,
+        vegetariano: true,
+        outrasInformacoes: true,
+        IE: true,
+        outroGenero: true,
+        otherInstitution: true,
+        primeiraComejaca: true,
+        deficienciaAuditiva: true,
+        deficienciaAutismo: true,
+        deficienciaIntelectual: true,
+        deficienciaParalisiaCerebral: true,
+        deficienciaVisual: true,
+        deficienciaFisica: true,
+        deficienciaOutra: true,
+        deficienciaOutraDescricao: true,
+        statusPagamento: true,
+        userId: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+
+    if (!inscricao) {
+      return res.status(404).json({ error: MESSAGES.errors.registrationNotFound });
+    }
+
+    // Verifica se o usuário é o dono ou admin
+    const isOwner = inscricao.userId === userId;
+    const isAdmin = usuario.role === 'admin';
+
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ error: 'Acesso não autorizado' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Dados da inscrição encontrados com sucesso!",
+      data: inscricao
+    });
+
+  } catch (error) {
+    console.error("Erro ao buscar inscrição:", error);
+
+    return res.status(500).json({
+      error: MESSAGES.errors.internalError,
+      details: process.env.NODE_ENV === "development" ? error.message : undefined
+    });
+  }
+};
+
   
    const esquecisenha = async (req, res) => {
     const { email } = req.body;
