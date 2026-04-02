@@ -32,23 +32,36 @@ function buildResetLink(token) {
   return url.toString();
 }
 
-async function sendPasswordResetEmail({ user, token }) {
+function sendPasswordResetEmail({ user, token }) {
   const resetLink = buildResetLink(token);
   const userName = user.name || 'participante';
 
-  console.log('Tentando enviar email...');
+  return {
+    resetLink,
+    userName,
+  };
+}
+
+function dispatchPasswordResetEmail({ user, token }) {
+  const { resetLink, userName } = sendPasswordResetEmail({ user, token });
+
+  console.log('Disparando envio de email em background...');
   console.log('Reset link final:', resetLink);
-  const info = await sendResetPasswordEmail({
+
+  sendResetPasswordEmail({
     to: user.email,
     name: userName,
     resetLink,
     expiresInMinutes: 15,
-  });
+  })
+    .then(() => {
+      console.log('Email enviado');
+    })
+    .catch((err) => {
+      console.error('Erro ao enviar email:', err);
+    });
 
-  return {
-    info,
-    resetLink,
-  };
+  return { resetLink };
 }
 
 async function createPasswordResetToken(prisma, userId) {
@@ -95,15 +108,15 @@ async function requestPasswordReset(prisma, email) {
   }
 
   const token = await createPasswordResetToken(prisma, user.id);
-  const emailResult = await sendPasswordResetEmail({ user, token });
+  console.log('Token de reset gerado para userId:', user.id);
+  const emailResult = dispatchPasswordResetEmail({ user, token });
 
   return {
     success: true,
-    reason: 'EMAIL_SENT',
+    reason: 'EMAIL_DISPATCHED',
     user,
     token,
     resetLink: emailResult.resetLink,
-    emailInfo: emailResult.info,
   };
 }
 

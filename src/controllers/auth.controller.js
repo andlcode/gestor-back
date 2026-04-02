@@ -1414,45 +1414,73 @@ const obterInscricao = async (req, res) => {
       res.status(500).json({ error: "Erro ao enviar e-mail." });
     }
   };
+const RESET_PASSWORD_REQUEST_MESSAGE =
+  'Se o e-mail existir em nossa base, enviaremos instruções.';
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const enviarEmailRedefinicao = async (req, res) => {
-  const { email } = req.body;
+  const { email } = req.body || {};
+  const genericSuccessResponse = {
+    message: RESET_PASSWORD_REQUEST_MESSAGE,
+  };
+
+  console.log('Iniciando requisição de forgot-password');
 
   if (!email || typeof email !== 'string') {
-    return res.status(400).json({ message: 'E-mail é obrigatório.' });
+    console.log('Forgot password recebido sem e-mail válido.');
+    return res.status(200).json(genericSuccessResponse);
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!normalizedEmail) {
+    console.log('Forgot password recebido com e-mail vazio após trim.');
+    return res.status(200).json(genericSuccessResponse);
+  }
+
+  if (!EMAIL_REGEX.test(normalizedEmail)) {
+    console.log('Forgot password recebido com formato de e-mail inválido.');
+    return res.status(200).json(genericSuccessResponse);
   }
 
   try {
-    const normalizedEmail = email.trim().toLowerCase();
     console.log('Forgot password solicitado para:', normalizedEmail);
     const result = await requestPasswordReset(prisma, normalizedEmail);
 
-    if (!result?.success) {
-      if (result?.reason === 'USER_NOT_FOUND') {
-        return res.status(404).json({ message: 'Usuário não encontrado.' });
-      }
-
-      return res.status(400).json({ message: 'Não foi possível solicitar a redefinição.' });
+    if (!result?.success && result?.reason !== 'USER_NOT_FOUND') {
+      console.error('Falha controlada ao solicitar reset de senha:', {
+        email: normalizedEmail,
+        reason: result?.reason || 'UNKNOWN_REASON',
+      });
     }
 
-    console.log('Email de redefinição enviado com sucesso para:', normalizedEmail);
-    return res.status(200).json({
-      message: 'E-mail de redefinição enviado com sucesso.',
-    });
+    if (result?.success) {
+      console.log('Envio de email de redefinição disparado para:', normalizedEmail);
+    } else {
+      console.log('Solicitação de reset finalizada sem usuário correspondente.');
+    }
+
+    return res.status(200).json(genericSuccessResponse);
   } catch (error) {
-    console.error('Erro ao enviar email:', error);
-    return res.status(500).json({ message: 'Erro ao enviar e-mail de redefinição.' });
+    console.error('Erro ao enviar email de redefinição:', {
+      email: normalizedEmail,
+      message: error?.message,
+      stack: error?.stack,
+    });
+
+    return res.status(200).json(genericSuccessResponse);
   }
 };
 
 const validateResetPasswordToken = async (req, res) => {
   const { token } = req.query;
 
-  if (!token || typeof token !== 'string') {
+  if (!token || typeof token !== 'string' || !token.trim()) {
     return res.status(400).json({ message: 'Token é obrigatório.' });
   }
 
   try {
-    const validationResult = await validatePasswordResetTokenService(prisma, token);
+    const validationResult = await validatePasswordResetTokenService(prisma, token.trim());
 
     if (!validationResult?.isValid) {
       const message =
@@ -1480,15 +1508,23 @@ const validateResetPasswordToken = async (req, res) => {
 };
 
 const resetPassword = async (req, res) => {
-  const { token, newPassword } = req.body;
+  const { token, newPassword } = req.body || {};
 
   if (!token || !newPassword) {
     return res.status(400).json({ message: 'Token e nova senha são obrigatórios.' });
   }
 
+  if (typeof token !== 'string' || !token.trim()) {
+    return res.status(400).json({ message: 'Token inválido.' });
+  }
+
+  if (typeof newPassword !== 'string') {
+    return res.status(400).json({ message: 'A nova senha informada é inválida.' });
+  }
+
   const normalizedPassword = newPassword.trim();
 
-  if (typeof newPassword !== 'string' || normalizedPassword.length < 8) {
+  if (normalizedPassword.length < 8) {
     return res.status(400).json({
       message: 'A nova senha deve ter pelo menos 8 caracteres.',
     });
@@ -1501,7 +1537,7 @@ const resetPassword = async (req, res) => {
   }
 
   try {
-    const result = await consumePasswordResetToken(prisma, token, normalizedPassword);
+    const result = await consumePasswordResetToken(prisma, token.trim(), normalizedPassword);
 
     if (!result?.success) {
       const message =
