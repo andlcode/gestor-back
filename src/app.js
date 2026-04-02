@@ -5,6 +5,7 @@ const dotenv = require('dotenv');
 
 const { PrismaClient } = require('@prisma/client');
 const authRoutes = require('./routes/auth.routes');
+const { verifyMailerConnection } = require('./config/mailer');
 
 // Configuração inicial
 dotenv.config()
@@ -110,6 +111,12 @@ app.use((err, req, res, next) => {
 
 const server = app.listen(process.env.PORT || 4000, () => {
   console.log(`🚀 Servidor rodando na porta ${process.env.PORT || 4000}`)
+
+  if (process.env.NODE_ENV !== 'production') {
+    verifyMailerConnection().catch((error) => {
+      console.error('Falha não bloqueante na verificação SMTP:', error)
+    })
+  }
 })
 
 const shutdown = async () => {

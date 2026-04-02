@@ -2,10 +2,15 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { generateVerificationCode } = require('../services/validation');
 const dotenv = require('dotenv');
-const transporter = require('../config/mailer');
 const Joi = require('joi');
 const { v4: uuidv4 } = require('uuid');
 const { PrismaClient, Prisma } = require('@prisma/client');
+const {
+  sendVerificationEmail,
+  sendAccountVerifiedEmail,
+  sendResetPasswordEmail,
+  sendAttachmentEmail,
+} = require('../services/emailService');
 const {
   requestPasswordReset,
   validatePasswordResetToken: validatePasswordResetTokenService,
@@ -118,6 +123,8 @@ const RESEND_INTERVAL = 60000; // 60 segundos
 
 
  const newAccountEmail = async (name, email, code) => {
+  return sendVerificationEmail({ to: email, name, code, type: 'register' });
+  /*
   try {
 // 🔴 BLOQUEIO DO SMTP
     if (process.env.ENABLE_SMTP !== "true") {
@@ -235,222 +242,15 @@ const RESEND_INTERVAL = 60000; // 60 segundos
     console.error('❌ Erro ao enviar e-mail:', error);
     throw new Error('Falha no envio do e-mail');
   }
+  */
 };
 
  const accountVerifiedEmail = async (name, email) => {
-  try {
-
-    // 🔴 BLOQUEIO DO SMTP
-    if (process.env.ENABLE_SMTP !== "true") {
-      console.log("📩 SMTP desativado");
-      return;
-    }
-    await transporter.sendMail({
-      from: `"COMEJACA" <${process.env.MAIL_USER}>`,
-      headers: {
-        'X-Mailer': 'Nodemailer',
-        'X-Priority': '3',
-        'Return-Path': 'process.env.MAIL_USER' 
-      },
-      to: email,
-      subject: '✅ Conta Verificada',
-      html: `
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Conta Verificada</title>
-          <style>
-            body {
-              font-family: 'Arial', sans-serif;
-              margin: 0;
-              padding: 30px 0;
-              background-color: #F2F2F2;
-            }
-            .container {
-              max-width: 680px;
-              margin: 0 auto;
-              background-color: #ffffff;
-              border-radius: 8px;
-              box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            }
-            .header {
-              padding: 40px 30px 20px;
-              border-bottom: 1px solid #e9ecef;
-              text-align: center;
-            }
-            .header img {
-              height: 40px;
-            }
-            .content {
-              padding: 40px 30px;
-              color: #4a4e69;
-            }
-            .success-message {
-              text-align: center;
-              margin: 30px 0;
-              font-size: 20px;
-              font-weight: 600;
-              color: #2ecc71;
-            }
-            a {
-              color: #2b6cb0 !important;
-              text-decoration: none !important;
-            }
-            .footer {
-              padding: 25px 30px;
-              background-color: #f8f9fa;
-              text-align: center;
-              font-size: 14px;
-              color: #6c757d;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <img src="https://i.postimg.cc/CxwC6HnL/favicon.png" alt="Logo COMEJACA">
-            </div>
-            
-            <div class="content">
-              <p>Olá ${name},</p>
-              
-              <p>Informamos que seu acesso ao <strong>Portal COMEJACA</strong> foi verificado com sucesso!</p>
-
-    
-
-              <p>Agora você tem acesso completo ao sistema.</p>
-
-              <p>Estamos empenhados em fazer você ter a melhor experiência.</p>
-
-              <p>Atenciosamente,<br>
-              Equipe COMEJACA</p>
-            </div>
-
-            <div class="footer">
-              <p>Esta é uma mensagem automática. Por favor não responda este e-mail.</p>
-              <p>Dúvidas? Contate-nos: suporte@comejaca.org.br </p>
-              <p>© ${new Date().getFullYear()} COMEJACA Gestão. Todos os direitos reservados.</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `,
-    });
-
-    console.log(`✅ E-mail de confirmação de verificação enviado para: ${email}`);
-  } catch (error) {
-    console.error('❌ Erro ao enviar e-mail:', error);
-    throw new Error('Falha no envio do e-mail');
-  }
+  return sendAccountVerifiedEmail({ to: email, name });
 };
 
  const novoCodigoEmail = async (name, email, code) => {
-  try {
-    await transporter.sendMail({
-      from: `"COMEJACA" <${process.env.MAIL_USER}>`,
-      to: email,
-      subject: 'Novo código',
-      html: `
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Novo código</title>
-          <style>
-            body {
-              font-family: 'Arial', sans-serif;
-              margin: 0;
-              padding: 30px 0;
-              background-color: #22223b;
-            }
-            .container {
-              max-width: 680px;
-              margin: 0 auto;
-              background-color: #ffffff;
-              border-radius: 8px;
-              box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            }
-            .header {
-              padding: 40px 30px 20px;
-              border-bottom: 1px solid #e9ecef;
-              text-align: center;
-            }
-            .header img {
-              height: 40px;
-            }
-            .content {
-              padding: 40px 30px;
-              color: #4a4e69;
-            }
-            .code-container {
-              margin: 30px 0;
-              text-align: center;
-            }
-            .verification-code {
-              display: inline-block;
-              padding: 15px 30px;
-              background-color: #22223b;
-              border-radius: 6px;
-              font-size: 24px;
-              font-weight: 600;
-              color: #fff;
-              letter-spacing: 2px;
-            }
-              a {
-  color: #2b6cb0 !important;
-  text-decoration: none !important;
-}
-            .footer {
-              padding: 25px 30px;
-              background-color: #f8f9fa;
-              text-align: center;
-              font-size: 14px;
-              color: #6c757d;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <img src="https://i.postimg.cc/CxwC6HnL/favicon.png" alt="Logo COMEJACA">
-            </div>
-            
-            <div class="content">
-              <p>Prezado(a) ${name},</p>
-              
-              <p>Seu cadastro no Sistema de <strong>Portal COMEJACA</strong>  está quase completo. <br><br> O próximo passo é verificar seu endereço e-mail inserindo o código abaixo através do portal <a href="https://www.comejaca.org.br" target="_blank">COMEJACA</a>.</p>
-
-              <div class="code-container">
-                <div class="verification-code">${code}</div>
-              </div>
-
-              <p>⏳ Este código é válido por 15 minutos.</p>
-
-        
-
-              <p>Atenciosamente,<br>
-              Equipe de Tecnologia COMEJACA</p>
-            </div>
-
-            <div class="footer">
-              <p>Esta é uma mensagem automática. Por favor não responda este e-mail.</p>
-              <p>Dúvidas? Contate-nos: suporte@comejaca.org.br </p>
-              <p>© ${new Date().getFullYear()} COMEJACA Gestão. Todos os direitos reservados.</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `,
-    });
-
-    console.log(`✅ E-mail de verificação enviado para: ${email}`);
-  } catch (error) {
-    console.error('❌ Erro ao enviar e-mail:', error);
-    throw new Error('Falha no envio do e-mail');
-  }
+  return sendVerificationEmail({ to: email, name, code, type: 'resend' });
 };
 
  const verificar = async (req, res) => {
@@ -1556,26 +1356,15 @@ const obterInscricao = async (req, res) => {
     const { email } = req.body;
 
     try {
-      // Gerando um token de redefinição (expira em 1 hora)
       const resetToken = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "1h" });
-  
-      // Criando o link de redefinição
       const resetLink = `${getFrontendBaseUrl()}/reset-password?token=${resetToken}`;
-  
-      // Enviando o e-mail
-      await transporter.sendMail({
-        from: `"Seu App" <${process.env.MAIL_USER}>`,
+      await sendResetPasswordEmail({
         to: email,
-        subject: "Redefinição de Senha",
-        html: `
-          <p>Olá,</p>
-          <p>Você solicitou a redefinição de senha. Clique no link abaixo para cadastrar uma nova senha:</p>
-          <p><a href="${resetLink}" target="_blank">Redefinir Senha</a></p>
-          <p>Se você não solicitou essa mudança, ignore este e-mail.</p>
-          <p>Este link é válido por 1 hora.</p>
-        `,
+        name: 'participante',
+        resetLink,
+        expiresInMinutes: 60,
       });
-  
+
       res.json({ message: "E-mail de redefinição enviado com sucesso!" });
     } catch (error) {
       console.error("Erro ao enviar e-mail:", error);
@@ -1770,6 +1559,18 @@ const resetPassword = async (req, res) => {
     const resetLink = `${getFrontendBaseUrl()}/reset-password?token=${token}`;
   
     try {
+      await sendResetPasswordEmail({
+        to: email,
+        name: user.name,
+        resetLink,
+        expiresInMinutes: 15,
+      });
+      res.json({ message: 'E-mail enviado com sucesso' });
+    } catch (error) {
+      console.error('Erro ao enviar e-mail:', error);
+      res.status(500).json({ message: 'Erro ao enviar e-mail' });
+    }
+    /*
 
       // 🔴 BLOQUEIO DO SMTP
     if (process.env.ENABLE_SMTP !== "true") {
@@ -1883,6 +1684,7 @@ const resetPassword = async (req, res) => {
       console.error('Erro ao enviar e-mail:', error);
       res.status(500).json({ message: 'Erro ao enviar e-mail' });
     }
+    */
   }; 
 
 
@@ -2107,90 +1909,12 @@ const atualizarPerfil = async (req, res) => {
 // Função que envia o e-mail com o arquivo
 const enviarEmailComArquivo = async (nomeCompleto, email, arquivo) => {
   console.log('Arquivo recebido:', arquivo);
-  try {
-    await transporter.sendMail({
-      from: `"COMEJACA" <${process.env.MAIL_USER}>`,
-      to: [email, 'and969696@outlook.com'],
-      subject: `Pagamento de ${nomeCompleto} confirmado`,
-      html: `
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-        <head>
-          <meta charset="UTF-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-          <title>Pagamento confirmado</title>
-          <style>
-            body {
-              font-family: 'Arial', sans-serif;
-              margin: 0;
-              padding: 30px 0;
-              background-color: #22223b;
-            }
-            .container {
-              max-width: 680px;
-              margin: 0 auto;
-              background-color: #ffffff;
-              border-radius: 8px;
-              box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            }
-            .header {
-              padding: 40px 30px 20px;
-              border-bottom: 1px solid #e9ecef;
-              text-align: center;
-            }
-            .header img {
-              height: 40px;
-            }
-            .content {
-              padding: 40px 30px;
-              color: #4a4e69;
-            }
-            a {
-              color: #2b6cb0 !important;
-              text-decoration: none !important;
-            }
-            .footer {
-              padding: 25px 30px;
-              background-color: #f8f9fa;
-              text-align: center;
-              font-size: 14px;
-              color: #6c757d;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <img src="https://i.postimg.cc/CxwC6HnL/favicon.png" alt="Logo COMEJACA" />
-            </div>
-            <div class="content">
-              <p>Prezado(a) ${nomeCompleto},</p>
-              <p>Recebemos e confirmamos o seu pagamento.</p>
-              <p>Verifique no anexo o comprovante correspondente.</p>
-              <p>Obrigado por sua participação!<br />Equipe COMEJACA</p>
-            </div>
-            <div class="footer">
-              <p>Esta é uma mensagem automática. Por favor não responda este e-mail.</p>
-              <p>Dúvidas? Contate-nos: suporte@comejaca.org.br </p>
-              <p>© ${new Date().getFullYear()} COMEJACA Gestão. Todos os direitos reservados.</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `,
-      attachments: [
-        {
-          filename: arquivo.originalname,
-          path: arquivo.path,
-        },
-      ],
-    });
-
-    console.log(`✅ E-mail de comprovante enviado para: ${email}`);
-  } catch (error) {
-    console.error('❌ Erro ao enviar comprovante:', error);
-    throw new Error('Falha no envio do e-mail de comprovante');
-  }
+  return sendAttachmentEmail({
+    to: email,
+    cc: ['and969696@outlook.com'],
+    name: nomeCompleto,
+    file: arquivo,
+  });
 };
 
 
