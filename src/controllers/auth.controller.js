@@ -88,6 +88,24 @@ const buildMercadoPagoPreferenceData = ({ participante, valor, notificationUrl }
   auto_return: 'approved',
 });
 
+const logMercadoPagoTokenStatus = (context) => {
+  const token = process.env.MERCADOPAGO_ACCESS_TOKEN || '';
+  const normalized = String(token).trim();
+
+  console.log(`[MercadoPago][${context}] token status:`, {
+    exists: Boolean(normalized),
+    prefix: normalized ? normalized.slice(0, 8) : null,
+    isAppToken: normalized.startsWith('APP_USR-'),
+    isTestToken: normalized.startsWith('TEST-'),
+    length: normalized.length,
+  });
+};
+
+const calcularValorInscricao = (dataNascimento) => {
+  const idade = calcularIdade(dataNascimento);
+  return idade < 11 ? 45 : 60;
+};
+
 // Constantes atualizadas para mensagens
 const MESSAGES = {
   errors: {
@@ -715,41 +733,9 @@ const participante = async (req, res) => {
       documentoResponsavel: req.body.documentoResponsavel ? req.body.documentoResponsavel.replace(/\D/g, '') : '',
     };
 
-    // Calcular idade e definir valor
-    const idade = calcularIdade(dadosParticipante.dataNascimento);
-    const valor = idade < 11 ? 45 : 60;
-
-    // Configurar Mercado Pago
-    if (!process.env.MERCADOPAGO_ACCESS_TOKEN) {
-      return res.status(500).json({ error: 'Token do Mercado Pago não configurado' });
-    }
-
-    const client = new mercadopago.MercadoPagoConfig({
-      accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN,
-    });
-
-    const preference = new mercadopago.Preference(client);
-    const preferenceData = buildMercadoPagoPreferenceData({
-      participante: dadosParticipante,
-      valor,
-      notificationUrl: `${BASE_URL}/api/auth/mercadopago/notificacao`,
-    });
-    console.log('FRONTEND_URL:', getFrontendBaseUrl());
-    console.log('Preference enviada:', preferenceData);
-
-    let mpResponse;
-    try {
-      mpResponse = await preference.create({ body: preferenceData });
-    } catch (mpError) {
-      console.error('Erro ao criar preferência do Mercado Pago:', mpError);
-      return res.status(500).json({ error: 'Erro ao gerar link de pagamento' });
-    }
-
-    const linkPagamento = mpResponse.init_point;
-
-    // Atualizar dados do participante com info do pagamento
-    dadosParticipante.valor = valor;
-    dadosParticipante.linkPagamento = linkPagamento;
+    // O link de pagamento e gerado apenas sob demanda no botao "Pagar".
+    dadosParticipante.valor = calcularValorInscricao(dadosParticipante.dataNascimento);
+    dadosParticipante.linkPagamento = null;
     dadosParticipante.statusPagamento = 'pendente';
 
     // Salvar participante no banco
@@ -799,6 +785,12 @@ const participante = async (req, res) => {
       },
     });
 
+    console.log('[MercadoPago][participante] inscricao criada sem gerar link:', {
+      id: novoParticipante.id,
+      linkPagamento: novoParticipante.linkPagamento,
+      statusPagamento: novoParticipante.statusPagamento,
+    });
+
     // Resposta final com sucesso
     return res.status(201).json({
       success: true,
@@ -831,6 +823,8 @@ const gerarNovoLinkPagamento = async (id) => {
       throw new Error('Mercado Pago Access Token não configurado');
     }
 
+    logMercadoPagoTokenStatus('gerarNovoLinkPagamento');
+
     const participante = await prisma.participante2025.findUnique({
       where: { id },
       select: {
@@ -838,6 +832,10 @@ const gerarNovoLinkPagamento = async (id) => {
         dataNascimento: true,
         email: true,
         nomeCompleto: true,
+        linkPagamento: true,
+        statusPagamento: true,
+        dataPagamento: true,
+        valor: true,
       },
     });
 
@@ -845,25 +843,40 @@ const gerarNovoLinkPagamento = async (id) => {
       throw new Error('Participante não encontrado para esse ID.');
     }
 
-    const { email, nomeCompleto, dataNascimento } = participante;
+    const { email, nomeCompleto, dataNascimento, linkPagamento, statusPagamento } = participante;
 
     if (!email || !nomeCompleto || !dataNascimento) {
       throw new Error('Dados do participante incompletos.');
     }
 
-    const calcularIdade = (dataNascimento) => {
-      const hoje = new Date();
-      const nascimento = new Date(dataNascimento);
-      let idade = hoje.getFullYear() - nascimento.getFullYear();
-      const m = hoje.getMonth() - nascimento.getMonth();
-      if (m < 0 || (m === 0 && hoje.getDate() < nascimento.getDate())) {
-        idade--;
-      }
-      return idade;
-    };
+    if (statusPagamento === 'pago') {
+      console.log('[MercadoPago][gerarNovoLinkPagamento] pagamento ja concluido, nenhum link novo sera gerado:', {
+        id: participante.id,
+        statusPagamento,
+        dataPagamento: participante.dataPagamento,
+      });
+      return {
+        success: false,
+        alreadyPaid: true,
+        message: 'Pagamento ja concluido.',
+      };
+    }
 
-    const idade = calcularIdade(dataNascimento);
-    const valor = idade < 11 ? 45 : 60;
+    if (linkPagamento && String(linkPagamento).trim()) {
+      console.log('[MercadoPago][gerarNovoLinkPagamento] reutilizando link existente:', {
+        id: participante.id,
+        linkPagamento,
+        statusPagamento,
+      });
+      return {
+        success: true,
+        reused: true,
+        linkPagamento,
+        participante,
+      };
+    }
+
+    const valor = calcularValorInscricao(dataNascimento);
 
     const preferenceData = buildMercadoPagoPreferenceData({
       participante: {
@@ -878,6 +891,7 @@ const gerarNovoLinkPagamento = async (id) => {
     console.log('Preference enviada:', preferenceData);
 
     const mpResponse = await preference.create({ body: preferenceData });
+    console.log('Resposta completa do Mercado Pago ao regenerar preferência:', mpResponse);
 
     if (!mpResponse || !mpResponse.init_point) {
       throw new Error('Falha ao gerar o link de pagamento.');
@@ -890,6 +904,15 @@ const gerarNovoLinkPagamento = async (id) => {
         statusPagamento: 'pendente',
         valor,
       },
+    });
+
+    console.log('[MercadoPago][gerarNovoLinkPagamento] link salvo no banco:', {
+      id: participanteAtualizado.id,
+      linkPagamento: participanteAtualizado.linkPagamento,
+      init_point: mpResponse?.init_point || null,
+      sandbox_init_point: mpResponse?.sandbox_init_point || null,
+      preferenceId: mpResponse?.id || null,
+      reused: false,
     });
 
     return {
@@ -908,8 +931,24 @@ const gerarNovoLinkPagamento = async (id) => {
 
 const updateInscricao = async (req, res) => {
   const { id } = req.params;
-  const dadosParticipante = req.body;
+  const {
+    linkPagamento: _linkPagamentoProtegido,
+    statusPagamento: _statusPagamentoProtegido,
+    dataPagamento: _dataPagamentoProtegido,
+    ...dadosParticipante
+  } = req.body;
   console.log("BODY RECEBIDO:", req.body);
+  console.log('[MercadoPago][updateInscricao] campos de pagamento recebidos no update:', {
+    id,
+    linkPagamento: req.body?.linkPagamento || null,
+    statusPagamento: req.body?.statusPagamento || null,
+  });
+  console.log('[MercadoPago][updateInscricao] campos de pagamento protegidos e ignorados:', {
+    id,
+    linkPagamentoIgnorado: req.body?.linkPagamento || null,
+    statusPagamentoIgnorado: req.body?.statusPagamento || null,
+    dataPagamentoIgnorado: req.body?.dataPagamento || null,
+  });
 
   try {
     // Verifica se o ID foi passado
@@ -997,7 +1036,11 @@ const updateInscricao = async (req, res) => {
         nomeCompleto: true,
         IE: true,
         createdAt: true,
-        tipoParticipacao: true
+        tipoParticipacao: true,
+        statusPagamento: true,
+        linkPagamento: true,
+        valor: true,
+        dataPagamento: true,
       }
     });
 
@@ -1492,15 +1535,36 @@ const resetPassword = async (req, res) => {
     }
   
     try {
-      const participante = await prisma.participante2025.findUnique({
-        where: { id },
-      });
-  
-      if (!participante || !participante.linkPagamento) {
-        return res.status(404).json({ error: 'Link de pagamento não encontrado' });
+      const resultado = await gerarNovoLinkPagamento(id);
+
+      if (!resultado.success && resultado.alreadyPaid) {
+        return res.status(400).json({
+          error: 'Pagamento ja concluido.',
+          statusPagamento: 'pago',
+        });
       }
-  
-      return res.status(200).json({ init_point: participante.linkPagamento });
+
+      if (!resultado.success) {
+        return res.status(500).json({
+          error: resultado.message || 'Erro ao buscar pagamento',
+        });
+      }
+
+      console.log(
+        resultado.reused
+          ? '[MercadoPago][paymentId] reutilizando link existente para o frontend:'
+          : '[MercadoPago][paymentId] retornando novo link gerado ao frontend:',
+        {
+          id,
+          statusPagamento: resultado.participante?.statusPagamento || 'pendente',
+          linkPagamento: resultado.linkPagamento,
+        }
+      );
+
+      return res.status(200).json({
+        init_point: resultado.linkPagamento,
+        reused: Boolean(resultado.reused),
+      });
     } catch (error) {
       console.error('Erro ao buscar link de pagamento:', error);
       return res.status(500).json({ error: 'Erro ao buscar pagamento' });
@@ -1824,6 +1888,14 @@ const atendimentoFraterno = async (req, res) => {
         return res.status(200).send('Pagamento já processado');
       }
 
+      if (mercadoPagoStatus === 'approved') {
+        console.log('[MercadoPago][webhook] pagamento aprovado recebido:', {
+          participanteId,
+          paymentId,
+          external_reference: paymentInfo.external_reference,
+        });
+      }
+
       const updatedParticipante = await prisma.participante2025.update({
         where: { id: participanteId },
         data: {
@@ -1848,6 +1920,14 @@ const atendimentoFraterno = async (req, res) => {
         statusAtualizado: updatedParticipante.statusPagamento,
         dataPagamento: updatedParticipante.dataPagamento,
       });
+
+      if (updatedParticipante.statusPagamento === 'pago') {
+        console.log('[MercadoPago][webhook] status atualizado para pago com sucesso:', {
+          participanteId,
+          paymentId,
+          dataPagamento: updatedParticipante.dataPagamento,
+        });
+      }
   
       return res.status(200).send('OK');
     } catch (err) {
