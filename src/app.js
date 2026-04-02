@@ -11,14 +11,61 @@ dotenv.config()
 const app = express()
 const prisma = new PrismaClient()
 
-app.use(helmet())
-app.use(cors({
-  origin: [process.env.FRONTEND_URL || 'http://localhost:3000', 'https://comejaca.org.br', 'https://comejaca-qa.netlify.app/'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+/** Remove barra final para bater com o header Origin do navegador. */
+function normalizeOrigin(url) {
+  if (!url || typeof url !== 'string') return url
+  return url.trim().replace(/\/+$/, '')
+}
+
+/** Origens permitidas (dev local + front em produção + env). */
+function buildAllowedOrigins() {
+  const vercelUrl = process.env.VERCEL_URL
+    ? `https://${String(process.env.VERCEL_URL).replace(/^https?:\/\//, '')}`
+    : undefined
+
+  const list = [
+    process.env.FRONTEND_URL,
+    process.env.VERCEL_FRONTEND_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    vercelUrl,
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://comejaca.org.br',
+  ]
+
+  const extra = process.env.CORS_EXTRA_ORIGINS
+  if (extra) {
+    extra.split(',').forEach((o) => list.push(o.trim()))
+  }
+
+  return new Set(list.filter(Boolean).map(normalizeOrigin))
+}
+
+const allowedOrigins = buildAllowedOrigins()
+
+const corsOptions = {
   credentials: true,
-}));
-app.options('*', cors());
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 204,
+  origin(origin, callback) {
+    if (!origin) {
+      return callback(null, true)
+    }
+    const normalized = normalizeOrigin(origin)
+    if (allowedOrigins.has(normalized)) {
+      return callback(null, true)
+    }
+    callback(null, false)
+  },
+}
+
+app.use(cors(corsOptions))
+app.options('*', cors(corsOptions))
+
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}))
 
 
 app.use(express.json())
@@ -28,31 +75,22 @@ app.use(express.urlencoded({ extended: true }))
 
 app.use('/api/auth', authRoutes)
 app.get('/api/health', async (req, res) => {
-  const services = {
-    api: 'UP',
-    database: 'UP'
-  };
-
-  let dbOk = true;
+  let database = 'UP'
 
   try {
-    await prisma.$queryRaw`SELECT 1`;
+    await prisma.$queryRaw`SELECT 1`
   } catch (err) {
-    services.database = 'DOWN';
-    dbOk = false;
+    database = 'DOWN'
   }
 
-  const status = dbOk ? 'UP' : services.api === 'UP' ? 'PARTIAL' : 'DOWN';
+  const status = database === 'UP' ? 'UP' : 'PARTIAL'
 
-  res.status(dbOk ? 200 : 503).json({
+  res.status(200).json({
     status,
-    services,
-    message: dbOk
-      ? 'Working...'
-      : 'API is up but database connection failed',
-    timestamp: new Date().toISOString()
-  });
-});
+    database,
+    timestamp: new Date().toISOString(),
+  })
+})
 
 
 

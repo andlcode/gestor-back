@@ -6,12 +6,82 @@ const transporter = require('../config/mailer');
 const Joi = require('joi');
 const { v4: uuidv4 } = require('uuid');
 const { PrismaClient, Prisma } = require('@prisma/client');
+const {
+  requestPasswordReset,
+  validatePasswordResetToken: validatePasswordResetTokenService,
+  consumePasswordResetToken,
+} = require('../services/passwordReset.service');
 
 const prisma = new PrismaClient();
 
 dotenv.config();
 const BASE_URL = process.env.BASE_URL;
-const FRONTEND_URL = process.env.FRONTEND_URL;
+const FRONTEND_URL =
+  process.env.FRONTEND_URL ||
+  process.env.VERCEL_FRONTEND_URL ||
+  process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+  (process.env.VERCEL_URL
+    ? `https://${String(process.env.VERCEL_URL).replace(/^https?:\/\//, '')}`
+    : '') ||
+  'http://localhost:3000';
+
+const getFrontendBaseUrl = () => {
+  return FRONTEND_URL.replace(/\/+$/, '');
+};
+
+const getPaymentStatusForStorage = (mercadoPagoStatus) => {
+  const normalizedStatus = String(mercadoPagoStatus || '').trim().toLowerCase();
+
+  switch (normalizedStatus) {
+    case 'approved':
+      return 'pago';
+    case 'pending':
+    case 'in_process':
+    case 'in_mediation':
+      return 'pendente';
+    default:
+      return 'N/A';
+  }
+};
+
+const buildFrontendStatusUrls = () => {
+  const frontendBaseUrl = getFrontendBaseUrl();
+
+  return {
+    success: `${frontendBaseUrl}/pagamento-sucesso`,
+    failure: `${frontendBaseUrl}/pagamento-erro`,
+    pending: `${frontendBaseUrl}/pagamento-pendente`,
+  };
+};
+
+const buildMercadoPagoPreferenceData = ({ participante, valor, notificationUrl }) => ({
+  items: [
+    {
+      title: `COMEJACA 2026 - ${participante.nomeCompleto}`,
+      description: `Inscrição de ${participante.nomeCompleto}`,
+      quantity: 1,
+      currency_id: 'BRL',
+      unit_price: valor,
+    },
+  ],
+  payer: {
+    name: participante.nomeCompleto,
+    email: participante.email,
+  },
+  external_reference: String(participante.id),
+  metadata: {
+    participanteId: String(participante.id),
+    nomeParticipante: participante.nomeCompleto,
+  },
+  payment_methods: {
+    excluded_payment_methods: [{ id: 'ticket' }, { id: 'atm' }],
+    excluded_payment_types: [{ id: 'ticket' }],
+    installments: 1,
+  },
+  notification_url: notificationUrl,
+  back_urls: buildFrontendStatusUrls(),
+  auto_return: 'approved',
+});
 
 // Constantes atualizadas para mensagens
 const MESSAGES = {
@@ -49,6 +119,13 @@ const RESEND_INTERVAL = 60000; // 60 segundos
 
  const newAccountEmail = async (name, email, code) => {
   try {
+// 🔴 BLOQUEIO DO SMTP
+    if (process.env.ENABLE_SMTP !== "true") {
+      console.log("📩 SMTP desativado");
+      return;
+    }
+
+
     await transporter.sendMail({
       from: `"COMEJACA" <${process.env.MAIL_USER}>`,
       headers: {
@@ -162,6 +239,12 @@ const RESEND_INTERVAL = 60000; // 60 segundos
 
  const accountVerifiedEmail = async (name, email) => {
   try {
+
+    // 🔴 BLOQUEIO DO SMTP
+    if (process.env.ENABLE_SMTP !== "true") {
+      console.log("📩 SMTP desativado");
+      return;
+    }
     await transporter.sendMail({
       from: `"COMEJACA" <${process.env.MAIL_USER}>`,
       headers: {
@@ -724,7 +807,7 @@ const mercadopago = require('mercadopago');
 const participante = async (req, res) => {
   const userId = req.userId;
   console.log("Valor de userId:", userId);
-  console.log("Dados recebidos:", req.body);
+  console.log("BODY RECEBIDO:", req.body);
 
   // Schema de validação completo (como você já escreveu)
   const schema = Joi.object({
@@ -846,35 +929,13 @@ const participante = async (req, res) => {
     });
 
     const preference = new mercadopago.Preference(client);
-    const preferenceData = {
-      items: [
-        {
-          title: 'COMEJACA | INSCRIÇÃO',
-          quantity: 1,
-          currency_id: 'BRL',
-          unit_price: valor,
-        },
-      ],
-      payer: {
-        email: dadosParticipante.email,
-        name: dadosParticipante.nomeCompleto,
-      },
-      metadata: {
-        participanteId: dadosParticipante.id,
-      },
-      payment_methods: {
-        excluded_payment_methods: [{ id: 'ticket' }, { id: 'atm' }],
-        excluded_payment_types: [{ id: 'ticket' }],
-        installments: 1,
-      },
-      notification_url: `${BASE_URL}/api/auth/mercadopago/notificacao`,
-      back_urls: {
-        success: 'https://comejaca.org/sucesso',
-  failure: 'https://comejaca.org/falha',
-  pending: 'https://comejaca.org/pendente'
-      },
-      auto_return: 'approved',
-    };
+    const preferenceData = buildMercadoPagoPreferenceData({
+      participante: dadosParticipante,
+      valor,
+      notificationUrl: `${BASE_URL}/api/auth/mercadopago/notificacao`,
+    });
+    console.log('FRONTEND_URL:', getFrontendBaseUrl());
+    console.log('Preference enviada:', preferenceData);
 
     let mpResponse;
     try {
@@ -1004,35 +1065,17 @@ const gerarNovoLinkPagamento = async (id) => {
     const idade = calcularIdade(dataNascimento);
     const valor = idade < 11 ? 45 : 60;
 
-    const preferenceData = {
-      items: [
-        {
-          title: 'COMEJACA | INSCRIÇÃO',
-          quantity: 1,
-          currency_id: 'BRL',
-          unit_price: valor,
-        },
-      ],
-      payer: {
+    const preferenceData = buildMercadoPagoPreferenceData({
+      participante: {
+        id: participante.id,
+        nomeCompleto,
         email,
-        name: nomeCompleto,
       },
-        metadata: {
-    participanteId: participante?.id || id,
-  },
-      payment_methods: {
-        excluded_payment_methods: [], // Não excluir nada por enquanto
-
-        installments: 1,
-      },
-      notification_url: `${process.env.BASE_URL}/api/auth/mercadopago/notificacao`,
-   back_urls: {
-  success: 'https://comejaca.org/sucesso',
-  failure: 'https://comejaca.org/falha',
-  pending: 'https://comejaca.org/pendente',
-  },
-      auto_return: 'approved',
-    };
+      valor,
+      notificationUrl: `${process.env.BASE_URL}/api/auth/mercadopago/notificacao`,
+    });
+    console.log('FRONTEND_URL:', getFrontendBaseUrl());
+    console.log('Preference enviada:', preferenceData);
 
     const mpResponse = await preference.create({ body: preferenceData });
 
@@ -1066,6 +1109,7 @@ const gerarNovoLinkPagamento = async (id) => {
 const updateInscricao = async (req, res) => {
   const { id } = req.params;
   const dadosParticipante = req.body;
+  console.log("BODY RECEBIDO:", req.body);
 
   try {
     // Verifica se o ID foi passado
@@ -1516,7 +1560,7 @@ const obterInscricao = async (req, res) => {
       const resetToken = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "1h" });
   
       // Criando o link de redefinição
-      const resetLink = `https://www.comejaca.org.br/redefinir-senha?token=${resetToken}`;
+      const resetLink = `${getFrontendBaseUrl()}/reset-password?token=${resetToken}`;
   
       // Enviando o e-mail
       await transporter.sendMail({
@@ -1541,147 +1585,113 @@ const obterInscricao = async (req, res) => {
 const enviarEmailRedefinicao = async (req, res) => {
   const { email } = req.body;
 
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ message: 'E-mail é obrigatório.' });
+  }
+
   try {
-    // 1. Verifica se o usuário existe
-    const user = await prisma.users.findUnique({ where: { email } });
-    if (!user) {
-      return res.status(404).json({ message: 'Usuário não encontrado' });
+    const normalizedEmail = email.trim().toLowerCase();
+    console.log('Forgot password solicitado para:', normalizedEmail);
+    const result = await requestPasswordReset(prisma, normalizedEmail);
+
+    if (!result?.success) {
+      if (result?.reason === 'USER_NOT_FOUND') {
+        return res.status(404).json({ message: 'Usuário não encontrado.' });
+      }
+
+      return res.status(400).json({ message: 'Não foi possível solicitar a redefinição.' });
     }
 
-    // 2. Gera token JWT com validade de 1h
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '5h' });
-
-    // 3. Monta o link de redefinição
-  const url = new URL('/novasenha', process.env.BASE_URL);
-url.searchParams.set('token', token);
-const resetLink = url.toString();
-
-    // 4. Envia o e-mail com layout HTML profissional
-    await transporter.sendMail({
-      from: `"COMEJACA" <${process.env.MAIL_USER}>`,
-      to: email,
-      subject: 'Redefinição de Senha',
-      html: `
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-        <head>
-          <meta charset="UTF-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-          <title>Redefinição de Senha</title>
-          <style>
-            body {
-              font-family: 'Arial', sans-serif;
-              margin: 0;
-              padding: 30px 0;
-              background-color: #f2f2f2;
-            }
-            .container {
-              max-width: 680px;
-              margin: 0 auto;
-              background-color: #ffffff;
-              border-radius: 6px;
-              box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            }
-            .header {
-              text-align: center;
-              padding: 30px;
-              border-bottom: 1px solid #ddd;
-            }
-            .header img {
-              width: 120px;
-              height: auto;
-            }
-            .content {
-              padding: 40px 30px;
-              color: #333;
-            }
-            .button {
-              display: inline-block;
-              margin: 30px 0;
-              padding: 14px 28px;
-              font-size: 16px;
-              color: #fff;
-              background-color: #0d1b2a;
-              text-decoration: none;
-              border-radius: 6px;
-            }
-            .footer {
-              padding: 25px 30px;
-              background-color: #f8f9fa;
-              text-align: center;
-              font-size: 14px;
-              color: #6c757d;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-               <img src="https://i.postimg.cc/CxwC6HnL/favicon.png" alt="Logo COMEJACA" />
-            </div>
-            <div class="content">
-              <p>Olá ${user.nome || 'usuário'},</p>
-              <p>Você solicitou a redefinição da sua senha no <strong>Portal COMEJACA</strong>.</p>
-              <p>Para criar uma nova senha, clique no botão abaixo:</p>
-              <div style="text-align: center;">
-                <a class="button" href="${resetLink}" target="_blank">Redefinir Senha</a>
-              </div>
-              <p>⏳ Este link é válido por 1 hora.</p>
-              <p>Se você não solicitou essa redefinição, pode ignorar este e-mail.</p>
-              <p>Atenciosamente,<br />Equipe COMEJACA</p>
-            </div>
-            <div class="footer">
-              <p>Esta é uma mensagem automática. Por favor, não responda este e-mail.</p>
-              <p>Dúvidas? Contate-nos: admin@comejaca.org.br</p>
-              <p>© ${new Date().getFullYear()} COMEJACA App. Todos os direitos reservados.</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `
+    console.log('Email de redefinição enviado com sucesso para:', normalizedEmail);
+    return res.status(200).json({
+      message: 'E-mail de redefinição enviado com sucesso.',
     });
-
-    // 5. Resposta de sucesso
-    return res.status(200).json({ message: 'E-mail de redefinição enviado com sucesso' });
-
   } catch (error) {
-    console.error('Erro ao enviar e-mail de redefinição:', error);
-    return res.status(500).json({ message: 'Erro ao enviar email' });
+    console.error('Erro ao enviar email:', error);
+    return res.status(500).json({ message: 'Erro ao enviar e-mail de redefinição.' });
   }
 };
 
+const validateResetPasswordToken = async (req, res) => {
+  const { token } = req.query;
+
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ message: 'Token é obrigatório.' });
+  }
+
+  try {
+    const validationResult = await validatePasswordResetTokenService(prisma, token);
+
+    if (!validationResult?.isValid) {
+      const message =
+        validationResult?.reason === 'expired'
+          ? 'Este link expirou. Solicite uma nova recuperação de senha.'
+          : 'Token inválido.';
+
+      return res.status(401).json({ message });
+    }
+
+    const passwordResetToken = validationResult.token;
+
+    return res.status(200).json({
+      message: 'Token válido.',
+      user: {
+        id: passwordResetToken.user.id,
+        name: passwordResetToken.user.name,
+        email: passwordResetToken.user.email,
+      },
+    });
+  } catch (error) {
+    console.error('Erro ao validar token de redefinição:', error);
+    return res.status(500).json({ message: 'Erro ao validar token.' });
+  }
+};
 
 const resetPassword = async (req, res) => {
   const { token, newPassword } = req.body;
 
   if (!token || !newPassword) {
-    return res.status(400).json({ message: "Token e nova senha são obrigatórios." });
+    return res.status(400).json({ message: 'Token e nova senha são obrigatórios.' });
+  }
+
+  const normalizedPassword = newPassword.trim();
+
+  if (typeof newPassword !== 'string' || normalizedPassword.length < 8) {
+    return res.status(400).json({
+      message: 'A nova senha deve ter pelo menos 8 caracteres.',
+    });
+  }
+
+  if (!/[A-Z]/.test(normalizedPassword)) {
+    return res.status(400).json({
+      message: 'Inclua pelo menos uma letra maiúscula na nova senha.',
+    });
   }
 
   try {
-    // Verifica o token JWT
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = decoded.userId;
+    const result = await consumePasswordResetToken(prisma, token, normalizedPassword);
 
-    // Busca o usuário no banco
-    const user = await prisma.users.findUnique({ where: { id: userId } });
-    if (!user) {
-      return res.status(404).json({ message: "Usuário não encontrado." });
+    if (!result?.success) {
+      const message =
+        result?.reason === 'expired'
+          ? 'Este link expirou. Solicite uma nova recuperação de senha.'
+          : 'Token inválido.';
+
+      return res.status(401).json({ message });
     }
 
-    // Hash da nova senha
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const user = result.user;
 
-    // Atualiza a senha no banco
-    await prisma.users.update({
-      where: { id: userId },
-      data: { password: hashedPassword },
+    return res.status(200).json({
+      message: 'Senha redefinida com sucesso.',
+      user: {
+        id: user.id,
+        name: user.name,
+      },
     });
-
-    return res.status(200).json({ message: "Senha redefinida com sucesso." });
   } catch (error) {
-    console.error("Erro ao redefinir senha:", error);
-    return res.status(401).json({ message: "Token inválido ou expirado." });
+    console.error('Erro ao redefinir senha:', error);
+    return res.status(500).json({ message: 'Erro ao redefinir senha.' });
   }
 };
 
@@ -1728,7 +1738,13 @@ const resetPassword = async (req, res) => {
       // Atualiza o status de pagamento
       const updated = await prisma.participante2025.update({
         where: { id },
-        data: { statusPagamento },
+        data: {
+          statusPagamento,
+          dataPagamento:
+            statusPagamento === 'pago'
+              ? participante.dataPagamento || new Date()
+              : participante.dataPagamento,
+        },
       });
   
       return res.status(200).json({ success: true, data: updated });
@@ -1751,9 +1767,15 @@ const resetPassword = async (req, res) => {
       { expiresIn: '1h' }
     );
   
-    const resetLink = `http://comejaca.org.br/recuperarsenha/route?token=${token}`;
+    const resetLink = `${getFrontendBaseUrl()}/reset-password?token=${token}`;
   
     try {
+
+      // 🔴 BLOQUEIO DO SMTP
+    if (process.env.ENABLE_SMTP !== "true") {
+      console.log("📩 SMTP desativado");
+      return;
+    }
       await transporter.sendMail({
         from: `"COMEJACA" <${process.env.MAIL_USER}>`,
         headers: {
@@ -1935,29 +1957,21 @@ const atendimentoFraterno = async (req, res) => {
 
   const notificacao = async (req, res) => {
     try {
- // Verificação da assinatura secreta
- const signature = req.headers['x-signature'];
- const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET; // Defina a assinatura secreta no .env
+      console.log('Webhook Mercado Pago recebido:', {
+        body: req.body,
+        query: req.query,
+      });
 
- const payload = JSON.stringify(req.body);
- const hash = crypto
-   .createHmac('sha256', secret)
-   .update(payload)
-   .digest('hex');
+      const paymentId = req.body?.data?.id || req.query['data.id'] || req.query.id;
+      const topic = req.body?.type || req.query.type || req.body?.action?.split('.')?.[0];
 
- if (signature !== hash) {
-   console.warn('Assinatura inválida do webhook!');
-   return res.status(401).send('Assinatura inválida');
- }
-
-
-      console.log('Webhook recebido:', req.body);
-  
-      const paymentId = req.body.data?.id;
-      const topic = req.body.type;
-  
       if (topic !== 'payment') {
         return res.status(200).send('Notificação ignorada');
+      }
+
+      if (!paymentId) {
+        console.warn('Webhook sem payment id.');
+        return res.status(400).send('Payment id ausente');
       }
   
       const client = new mercadopago.MercadoPagoConfig({
@@ -1965,25 +1979,72 @@ const atendimentoFraterno = async (req, res) => {
       });
   
       const payment = await mercadopago.Payment.findById(client, paymentId);
-      const paymentInfo = payment.body;
+      const paymentInfo = payment?.body || payment;
   
-      const status = paymentInfo.status; // 'approved', 'pending', etc
-      const metadata = paymentInfo.metadata;
-  
-      const participanteId = metadata.participanteId;
-  
-      console.log('Pagamento recebido para participante:', participanteId, 'Status:', status);
+      const mercadoPagoStatus = paymentInfo.status;
+      const statusPagamento = getPaymentStatusForStorage(mercadoPagoStatus);
+      const participanteId = String(
+        paymentInfo.external_reference || paymentInfo.metadata?.participanteId || ''
+      ).trim();
+
+      console.log('Detalhes do pagamento recebidos:', {
+        paymentId,
+        external_reference: paymentInfo.external_reference,
+        metadataParticipanteId: paymentInfo.metadata?.participanteId,
+        statusMercadoPago: mercadoPagoStatus,
+        statusNormalizado: statusPagamento,
+      });
   
       if (!participanteId) {
-        return res.status(400).send('ParticipanteId ausente na metadata');
+        return res.status(400).send('ParticipanteId ausente em external_reference/metadata');
       }
-  
-      // Atualiza no banco (com Prisma)
-      await prisma.participante2025.update({
+
+      const participante = await prisma.participante2025.findUnique({
+        where: { id: participanteId },
+        select: {
+          id: true,
+          nomeCompleto: true,
+          statusPagamento: true,
+          dataPagamento: true,
+        },
+      });
+
+      if (!participante) {
+        console.warn('Participante não encontrado para webhook:', participanteId);
+        return res.status(404).send('Participante não encontrado');
+      }
+
+      if (participante.statusPagamento === 'pago' && statusPagamento === 'pago') {
+        console.log('Pagamento já estava marcado como pago. Nenhuma atualização necessária.', {
+          participanteId,
+          paymentId,
+        });
+        return res.status(200).send('Pagamento já processado');
+      }
+
+      const updatedParticipante = await prisma.participante2025.update({
         where: { id: participanteId },
         data: {
-          statusPagamento: status,
+          statusPagamento,
+          dataPagamento:
+            statusPagamento === 'pago'
+              ? participante.dataPagamento || new Date()
+              : participante.dataPagamento,
         },
+        select: {
+          id: true,
+          nomeCompleto: true,
+          statusPagamento: true,
+          dataPagamento: true,
+        },
+      });
+
+      console.log('Resultado da atualização do pagamento:', {
+        paymentId,
+        participanteId,
+        statusMercadoPago: mercadoPagoStatus,
+        statusAtualizado: updatedParticipante.statusPagamento,
+        dataPagamento: updatedParticipante.dataPagamento,
       });
   
       return res.status(200).send('OK');
@@ -2135,4 +2196,4 @@ const enviarEmailComArquivo = async (nomeCompleto, email, arquivo) => {
 
   
 
-  module.exports = { changePassword,esquecisenha, obterInscricao, getProfile, updateProfile, atualizarInstituicao, listarInstituicoes, criarInstituicao, getparticipantes, participante,resendVerificationCode, login, register, validateToken,verificar, paymentId,resetPassword, forgotPassword,listarParticipantes, notificacao, AtualizarpaymentId, atualizarPerfil, atendimentoFraterno, updateInscricao, gerarNovoLinkPagamento, enviarEmailComArquivo, enviarEmailRedefinicao}
+  module.exports = { changePassword,esquecisenha, obterInscricao, getProfile, updateProfile, atualizarInstituicao, listarInstituicoes, criarInstituicao, getparticipantes, participante,resendVerificationCode, login, register, validateToken,verificar, paymentId,resetPassword, forgotPassword,listarParticipantes, notificacao, AtualizarpaymentId, atualizarPerfil, atendimentoFraterno, updateInscricao, gerarNovoLinkPagamento, enviarEmailComArquivo, enviarEmailRedefinicao, validateResetPasswordToken}

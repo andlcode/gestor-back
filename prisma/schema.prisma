@@ -25,6 +25,8 @@ model Users {
   instituicoesAtualizadas    InstituicaoEspirita[] @relation("InstituicaoAtualizadaPor")
   instituicoesCriadas        InstituicaoEspirita[] @relation("InstituicaoCriadaPor")
   Participante2025           Participante2025[]
+
+  Participante2026           Participante2026[]
   instituicoes               InstituicaoEspirita[] @relation("InstituicaoEspiritaToUsers")
   passwordResetTokens        PasswordResetToken[]
  resetTokenVersion  Int      @default(0)
@@ -55,6 +57,7 @@ model InstituicaoEspirita {
   atualizadoPor    Users?             @relation("InstituicaoAtualizadaPor", fields: [atualizadoPorId], references: [id])
   criadoPor        Users?             @relation("InstituicaoCriadaPor", fields: [criadoPorId], references: [id])
   Participante2025 Participante2025[]
+    Participante2026 Participante2026[]
   Users            Users[]            @relation("InstituicaoEspiritaToUsers")
 
   @@map("InstituicaoEspirita")
@@ -77,6 +80,7 @@ model Participante2025 {
   idade                        Int?
   valor                        Float?
   statusPagamento              String?
+  dataPagamento                DateTime?
   tipoParticipacao             TipoParticipacao
   comissao                     String?
   tamanhoCamisa                String?
@@ -113,6 +117,62 @@ model Participante2025 {
   user                         Users?               @relation(fields: [userId], references: [id])
 
   @@map("Participantes2025")
+}
+
+model Participante2026 {
+  id                           String               @id @default(uuid())
+  nomeCompleto                 String
+  nomeCracha                   String?
+  cpf                          String?
+  nomeSocial                   String?
+  dataNascimento               DateTime
+  sexo                         String
+  email                        String
+  telefone                     String
+  nomeCompletoResponsavel      String?
+  documentoResponsavel         String?
+  telefoneResponsavel          String?
+  linkPagamento                String?
+  idade                        Int?
+  valor                        Float?
+  statusPagamento              String?
+  dataPagamento                DateTime?
+  tipoParticipacao             TipoParticipacao
+  comissao                     String?
+  tamanhoCamisa                String?
+  cep                          String
+  estado                       String?
+  cidade                       String?
+  bairro                       String?
+  logradouro                   String?
+  numero                       String?
+  complemento                  String?
+  outroGenero                  String?
+  medicacao                    String?
+  alergia                      String?
+  outrasInformacoes            String?
+  userId                       Int?
+  createdAt                    DateTime             @default(now())
+  updatedAt                    DateTime             @updatedAt
+  IE                           String
+  instituicaoId                Int?
+  vegetariano                  String               @default("N/A")
+  camisa                       Boolean?
+  primeiraComejaca             Boolean?             @default(false)
+  deficienciaAuditiva          Boolean?
+  deficienciaAutismo           Boolean?
+  deficienciaIntelectual       Boolean?
+  deficienciaParalisiaCerebral Boolean?
+  deficienciaVisual            Boolean?
+  deficienciaFisica            Boolean?
+  deficienciaOutra             Boolean?
+  deficienciaOutraDescricao    String?
+  otherInstitution             String?
+  
+  instituicao                  InstituicaoEspirita? @relation(fields: [instituicaoId], references: [id])
+  user                         Users?               @relation(fields: [userId], references: [id])
+
+  @@map("Participantes2026")
 }
 
 enum Role {

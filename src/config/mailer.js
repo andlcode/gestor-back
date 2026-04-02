@@ -3,11 +3,15 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 
-dotenv.config();
-
 // Verificando se a porta e o secure estão configurados corretamente
 const port = Number(process.env.MAIL_PORT);
 const secure = port === 465; // Usar SSL/TLS com porta 465, caso contrário, STARTTLS com 587
+const hasRequiredConfig = Boolean(
+  process.env.MAIL_HOST &&
+    process.env.MAIL_PORT &&
+    process.env.MAIL_USER &&
+    process.env.MAIL_PASS
+);
 
 // Criação do transportador para o Nodemailer
 const transporter = nodemailer.createTransport({
@@ -25,7 +29,14 @@ transporter.verify((error, success) => {
   if (error) {
     console.log("Erro ao conectar no SMTP:", error);
   } else {
-    console.log("Conexão SMTP bem-sucedida!");
+    console.log("Conexão SMTP bem-sucedida!", {
+      host: process.env.MAIL_HOST,
+      port,
+      secure,
+      userConfigured: Boolean(process.env.MAIL_USER),
+      passConfigured: Boolean(process.env.MAIL_PASS),
+      hasRequiredConfig,
+    });
   }
 });
 
