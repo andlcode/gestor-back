@@ -32,6 +32,7 @@ function buildAllowedOrigins() {
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'https://comejaca.org.br',
+    'https://www.comejaca.org.br',
     'https://gestor-comejaca.vercel.app',
   ]
 
