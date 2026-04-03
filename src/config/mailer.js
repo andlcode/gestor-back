@@ -7,7 +7,7 @@ const resendApiKey = process.env.RESEND_API_KEY;
 const defaultFromEmail =
   process.env.RESEND_FROM_EMAIL ||
   process.env.MAIL_FROM ||
-  'COMEJACA <onboarding@resend.dev>';
+  'COMEJACA <noreply@comejaca.org.br>';
 const hasRequiredConfig = Boolean(resendApiKey);
 const resend = hasRequiredConfig ? new Resend(resendApiKey) : null;
 

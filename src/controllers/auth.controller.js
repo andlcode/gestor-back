@@ -34,6 +34,8 @@ const getFrontendBaseUrl = () => {
   return FRONTEND_URL.replace(/\/+$/, '');
 };
 
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+
 const getPaymentStatusForStorage = (mercadoPagoStatus) => {
   const normalizedStatus = String(mercadoPagoStatus || '').trim().toLowerCase();
 
@@ -375,6 +377,7 @@ const RESEND_INTERVAL = 60000; // 60 segundos
 
  
   try {
+    const normalizedEmail = normalizeEmail(email);
 
     const isStrongPassword = (password) => {
       const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&.])[A-Za-z\d@$!%*?&.]{8,}$/;
@@ -382,7 +385,7 @@ const RESEND_INTERVAL = 60000; // 60 segundos
     };
     
     // Validação dos campos
-    if (!name || !email || !password) {
+    if (!name || !normalizedEmail || !password) {
       return res.status(400).json({ error: MESSAGES.errors.missingFields });
     }
     if (!isStrongPassword(password)) {
@@ -391,7 +394,14 @@ const RESEND_INTERVAL = 60000; // 60 segundos
       });
     }
     // Verifica usuário existente
-    const existingUser = await prisma.users.findUnique({ where: { email } });
+    const existingUser = await prisma.users.findFirst({
+      where: {
+        email: {
+          equals: normalizedEmail,
+          mode: 'insensitive',
+        },
+      },
+    });
     if (existingUser) {
       return res.status(400).json({ error: MESSAGES.errors.emailInUse });
     }
@@ -407,7 +417,7 @@ const RESEND_INTERVAL = 60000; // 60 segundos
     const newUser = await prisma.users.create({
       data: {
         name,
-        email,
+        email: normalizedEmail,
         password: hashedPassword,
         verificationCode,
         verificationCodeExpiration,
@@ -427,7 +437,7 @@ const RESEND_INTERVAL = 60000; // 60 segundos
     );
 
     // Envio do e-mail de verificação
-    await newAccountEmail(name, email, verificationCode);
+    await newAccountEmail(name, normalizedEmail, verificationCode);
 
     // Resposta com JWT e dados do usuário
     return res.status(201).json({
@@ -465,7 +475,9 @@ const changePassword = async (req, res) => {
   };
 
   try {
-    if (!email || !newPassword) {
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!normalizedEmail || !newPassword) {
       return res.status(400).json({ error: "E-mail e nova senha são obrigatórios." });
     }
 
@@ -475,7 +487,14 @@ const changePassword = async (req, res) => {
       });
     }
 
-    const user = await prisma.users.findUnique({ where: { email } });
+    const user = await prisma.users.findFirst({
+      where: {
+        email: {
+          equals: normalizedEmail,
+          mode: 'insensitive',
+        },
+      },
+    });
     if (!user) {
       return res.status(404).json({ error: "Usuário não encontrado." });
     }
@@ -483,7 +502,7 @@ const changePassword = async (req, res) => {
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     await prisma.users.update({
-      where: { email },
+      where: { id: user.id },
       data: { password: hashedPassword }
     });
 
@@ -499,11 +518,19 @@ const changePassword = async (req, res) => {
   const { email, password } = req.body;
 
   try {
+    const normalizedEmail = normalizeEmail(email);
     console.log('Buscando usuário no banco de dados...');
-    const user = await prisma.users.findUnique({ where: { email } });
+    const user = await prisma.users.findFirst({
+      where: {
+        email: {
+          equals: normalizedEmail,
+          mode: 'insensitive',
+        },
+      },
+    });
 
     if (!user) {
-      console.log('Usuário não encontrado:', email);
+      console.log('Usuário não encontrado:', normalizedEmail);
       return res.status(404).json({ error: MESSAGES.errors.userNotFound });
     }
 
@@ -547,13 +574,21 @@ const changePassword = async (req, res) => {
   const { email } = req.body;
 
   try {
-    console.log('Iniciando reenvio do código de verificação para:', email);
+    const normalizedEmail = normalizeEmail(email);
+    console.log('Iniciando reenvio do código de verificação para:', normalizedEmail);
 
     // Verifica se o usuário existe
-    const user = await prisma.users.findUnique({ where: { email } });
+    const user = await prisma.users.findFirst({
+      where: {
+        email: {
+          equals: normalizedEmail,
+          mode: 'insensitive',
+        },
+      },
+    });
 
     if (!user) {
-      console.log(`Usuário não encontrado: ${email}`);
+      console.log(`Usuário não encontrado: ${normalizedEmail}`);
       return res.status(400).json({ error: MESSAGES.errors.userNotFound });
     }
 
@@ -565,7 +600,7 @@ const changePassword = async (req, res) => {
 
     // Atualiza o código e a data de expiração no banco
     await prisma.users.update({
-      where: { email },
+      where: { id: user.id },
       data: {
         verificationCode: newVerificationCode,
         verificationCodeExpiration,
@@ -725,6 +760,7 @@ const participante = async (req, res) => {
     const dadosParticipante = {
       id: participanteId,
       ...req.body,
+      email: normalizeEmail(req.body.email),
       userId,
       dataNascimento: new Date(req.body.dataNascimento),
       cep: req.body.cep ? req.body.cep.replace(/\D/g, '') : '',
@@ -958,7 +994,12 @@ const updateInscricao = async (req, res) => {
 
     const participanteAtualizado = await prisma.participante2025.update({
       where: { id },
-      data: dadosParticipante,
+      data: {
+        ...dadosParticipante,
+        ...(Object.prototype.hasOwnProperty.call(dadosParticipante, 'email')
+          ? { email: normalizeEmail(dadosParticipante.email) }
+          : {}),
+      },
       select: {
         id: true,
         nomeCompleto: true,
@@ -1014,21 +1055,18 @@ const updateInscricao = async (req, res) => {
   }
 };
 
- const getparticipantes = async (req, res) => {
+const getparticipantes = async (req, res) => {
   try {
-    // 1. Obter ID do usuário corretamente do middleware de autenticação
-    const userId = req.userId;  // ✅ Correto (assumindo que o middleware populou req.user)
+    const userId = req.userId;
 
-    // 2. Validação reforçada
     if (!userId) {
-      console.warn('Tentativa de acesso não autenticada');
-      return res.status(401).json({ 
+      console.warn('[getparticipantes] Tentativa de acesso não autenticada');
+      return res.status(401).json({
         error: 'Não autorizado',
-        message: 'Token de acesso inválido ou expirado' 
+        message: 'Token de acesso inválido ou expirado'
       });
     }
 
-    // 3. Buscar participantes com tratamento de erros específico
     const participantes = await prisma.participante2025.findMany({
       where: { userId },
       select: {
@@ -1044,41 +1082,69 @@ const updateInscricao = async (req, res) => {
       }
     });
 
-    // 4. Melhor resposta para nenhum resultado
-    if (participantes.length === 0) {
-      return res.status(200).json({
-        message: 'Nenhuma inscrição encontrada',
-        suggestions: ['Verifique se já realizou alguma inscrição']
-      });
-    }
+    console.log('[getparticipantes][RAW]', participantes);
 
-    // 5. Resposta de sucesso padronizada
+    const data = participantes.map((item) => {
+      const createdAtDate = item.createdAt ? new Date(item.createdAt) : null;
+
+      const derivedYear =
+        createdAtDate && !Number.isNaN(createdAtDate.getTime())
+          ? createdAtDate.getFullYear()
+          : null;
+
+      return {
+        ...item,
+        cycleYear: derivedYear,
+        registrationYear: derivedYear,
+        sourceTable: 'participante2025',
+      };
+    });
+
+    console.log('[getparticipantes][FINAL DATA]', JSON.stringify(data, null, 2));
+
+    console.log(
+      '[getparticipantes][DEBUG ANO]',
+      data.map((p) => ({
+        id: p.id,
+        nome: p.nomeCompleto,
+        createdAt: p.createdAt,
+        derivedYear: p.cycleYear,
+      }))
+    );
+
+    const byYear = data.reduce((acc, item) => {
+      const key = item.cycleYear || 'unknown';
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+
+    console.log('[getparticipantes][SUMMARY]', {
+      total: data.length,
+      porAno: byYear,
+    });
+
     return res.status(200).json({
-      count: participantes.length,
-      data: participantes,
+      count: data.length,
+      data,
       meta: {
-        requestId: req.requestId, // Assumindo que existe um ID de requisição
+        requestId: req.requestId,
         timestamp: new Date().toISOString()
       }
     });
-
   } catch (error) {
-    // 6. Log de erro melhorado
-    console.error(`Erro [${req.requestId}] em getparticipantes:`, {
-      error: error.message,
+    console.error(`[getparticipantes][ERRO][${req.requestId}]`, {
+      message: error.message,
       stack: error.stack,
-      userId: req.user?.userId
+      userId: req.userId
     });
 
-    // 7. Resposta de erro padronizada
     return res.status(500).json({
       error: 'Erro no processamento',
       message: 'Não foi possível recuperar as inscrições',
-      reference: req.requestId // Para rastreamento de logs
+      reference: req.requestId
     });
   }
 };
-
  const criarInstituicao = async (req, res) => {
   try {
   
@@ -1125,7 +1191,7 @@ const updateInscricao = async (req, res) => {
         telefone: req.body.telefone,
         horario: req.body.horario,
         dia: req.body.dia,
-        email: req.body.email,
+        email: normalizeEmail(req.body.email),
         CNPJ: req.body.CNPJ, // Incluindo o CNPJ se necessário
         criadoPor: {
           connect: { id: userId }, // Relacionando o usuário com a instituição
@@ -1214,7 +1280,7 @@ const updateInscricao = async (req, res) => {
         telefone: req.body.telefone || instituicao.telefone,
         horario: req.body.horario || instituicao.horario,
         dia: req.body.dia || instituicao.dia,
-        email: req.body.email || instituicao.email,
+        email: req.body.email ? normalizeEmail(req.body.email) : instituicao.email,
         atualizadoPorId: userId, // Atualizando o ID do usuário que fez a atualização
       },
     });
@@ -1228,9 +1294,10 @@ const updateInscricao = async (req, res) => {
 };
  const updateProfile = async (req, res) => { 
   const { userId, name, email, phone, currentPassword, newPassword, communication1, communication2 } = req.body;
+  const normalizedEmail = normalizeEmail(email);
 
   // Validações de dados
-  if (!userId || !name || !email || !currentPassword ) {
+  if (!userId || !name || !normalizedEmail || !currentPassword ) {
     return res.status(400).send('Todos os campos obrigatórios precisam ser preenchidos.');
   }
 
@@ -1256,7 +1323,7 @@ const updateInscricao = async (req, res) => {
       WHERE id = $7
       RETURNING id
     `;
-    const values = [name, email, phone, newPassword, communication1, communication2, userId];
+    const values = [name, normalizedEmail, phone, newPassword, communication1, communication2, userId];
 
     const updateResult = await pool.query(updateQuery, values);
 
@@ -1399,10 +1466,11 @@ const obterInscricao = async (req, res) => {
     const { email } = req.body;
 
     try {
-      const resetToken = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "1h" });
+      const normalizedEmail = normalizeEmail(email);
+      const resetToken = jwt.sign({ email: normalizedEmail }, process.env.JWT_SECRET, { expiresIn: "1h" });
       const resetLink = `${getFrontendBaseUrl()}/reset-password?token=${resetToken}`;
       await sendResetPasswordEmail({
-        to: email,
+        to: normalizedEmail,
         name: 'participante',
         resetLink,
         expiresInMinutes: 60,
@@ -1652,8 +1720,17 @@ const resetPassword = async (req, res) => {
 
   const forgotPassword = async (req, res) => {
     const { email } = req.body;
+
+    const normalizedEmail = normalizeEmail(email);
   
-    const user = await prisma.users.findUnique({ where: { email } });
+    const user = await prisma.users.findFirst({
+      where: {
+        email: {
+          equals: normalizedEmail,
+          mode: 'insensitive',
+        },
+      },
+    });
     if (!user) return res.status(404).json({ message: 'Usuário não encontrado' });
   
     const token = jwt.sign(
@@ -1666,7 +1743,7 @@ const resetPassword = async (req, res) => {
   
     try {
       await sendResetPasswordEmail({
-        to: email,
+        to: user.email,
         name: user.name,
         resetLink,
         expiresInMinutes: 15,
@@ -1999,7 +2076,7 @@ const atualizarPerfil = async (req, res) => {
     // Prepara os dados de atualização
     const updateData = {
       name: nome,
-      email: email,
+      email: normalizeEmail(email),
       telefone: telefone,
       comunicacaocomejaca: comunicacaocomejaca,
       comunicacaomovimento: comunicacaomovimento,
@@ -2032,7 +2109,7 @@ const atualizarPerfil = async (req, res) => {
 const enviarEmailComArquivo = async (nomeCompleto, email, arquivo) => {
   console.log('Arquivo recebido:', arquivo);
   return sendAttachmentEmail({
-    to: email,
+    to: normalizeEmail(email),
     cc: ['and969696@outlook.com'],
     name: nomeCompleto,
     file: arquivo,
