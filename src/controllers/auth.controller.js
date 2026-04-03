@@ -35,6 +35,8 @@ const getFrontendBaseUrl = () => {
 };
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+const hasAdminAccess = (role) => role === 'admin' || role === 'admin_total';
+const isAdminTotalRole = (role) => role === 'admin_total';
 
 const getPaymentStatusForStorage = (mercadoPagoStatus) => {
   const normalizedStatus = String(mercadoPagoStatus || '').trim().toLowerCase();
@@ -465,7 +467,7 @@ const changePassword = async (req, res) => {
   // Verificação de permissão
   const requestingUser = req.user; // Deve vir do middleware de autenticação
 
-  if (!requestingUser || requestingUser.role !== 'admin') {
+  if (!requestingUser || !hasAdminAccess(requestingUser.role)) {
     return res.status(403).json({ error: "Acesso negado. Apenas administradores podem alterar senhas." });
   }
 
@@ -1017,7 +1019,7 @@ const updateInscricao = async (req, res) => {
       return res.status(404).json({ error: 'Participante não encontrado.' });
     }
 
-    const isAdmin = usuario.role === 'admin';
+    const isAdmin = hasAdminAccess(usuario.role);
     const isOwner = participanteExistente.userId === userId;
 
     if (!isOwner && !isAdmin) {
@@ -1285,7 +1287,7 @@ const getparticipantes = async (req, res) => {
     }
 
     // Verificando se o usuário é administrador
-    if (user.role !== 'admin') {
+    if (!hasAdminAccess(user.role)) {
       return res.status(403).json({ error: "Acesso negado. Somente administradores podem atualizar." });
     }
 
@@ -1471,7 +1473,7 @@ const obterInscricao = async (req, res) => {
 
     // Verifica se o usuário é o dono ou admin
     const isOwner = inscricao.userId === userId;
-    const isAdmin = usuario.role === 'admin';
+    const isAdmin = hasAdminAccess(usuario.role);
 
     if (!isOwner && !isAdmin) {
       return res.status(403).json({ error: 'Acesso não autorizado' });
@@ -1721,6 +1723,20 @@ const resetPassword = async (req, res) => {
     console.log('ID do participante:', id); // Adicione este log para verificar o id
   
     try {
+    const userId = req.userId;
+    const usuario = req.user || (await prisma.users.findUnique({ where: { id: userId } }));
+
+    if (!usuario) {
+      return res.status(404).json({ success: false, error: 'Usuário não encontrado' });
+    }
+
+    if (!isAdminTotalRole(usuario.role)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Acesso negado. Apenas admin_total pode alterar status de pagamento',
+      });
+    }
+
       // Verifique se o participante existe
       const participante = await prisma.participante2025.findUnique({
         where: { id },

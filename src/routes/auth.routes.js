@@ -3,6 +3,7 @@ const fs = require('fs');
 
 const { isAuthenticated } = require('../middlewares/authMiddleware.js');
 const { isAdmin } = require('../middlewares/isAdmin.js');
+const { isAdminTotal } = require('../middlewares/isAdminTotal.js');
 const { verifyToken } = require('../middlewares/isVerify.js');
 
 const {
@@ -82,7 +83,7 @@ router.get('/print/:participanteId', isAuthenticated, obterInscricao);
 
 router.get('/pagamento/:id', isAuthenticated, paymentId);
 router.get('/pagamentos', isAuthenticated, listarParticipantes);
-router.put('/pagamentos/:id/status', isAuthenticated, isAdmin, AtualizarpaymentId);
+router.put('/pagamentos/:id/status', isAuthenticated, isAdminTotal, AtualizarpaymentId);
 
 router.put('/atualizarPerfil', isAuthenticated, atualizarPerfil);
 router.put('/participante/:id', isAuthenticated, updateInscricao);

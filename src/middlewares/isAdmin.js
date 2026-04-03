@@ -17,11 +17,12 @@ const isAdmin = async (req, res, next) => {
       return res.status(404).json({ error: "Usuário não encontrado." });
     }
 
-    // Verifica se o usuário tem permissão de admin
-    if (user.role !== "admin") {
+    // admin_total herda todas as permissões de admin
+    if (!['admin', 'admin_total'].includes(user.role)) {
       return res.status(403).json({ error: "Acesso negado. Apenas administradores podem editar instituições." });
     }
 
+    req.user = user;
     next(); // Usuário é admin, prosseguir para a próxima função
   } catch (error) {
     console.error("Erro na verificação de admin:", error);

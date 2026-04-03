@@ -178,6 +178,7 @@ model Participante2026 {
 enum Role {
   user
   admin
+  admin_total
 }
 
 enum Sexo {
