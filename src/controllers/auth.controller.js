@@ -987,9 +987,41 @@ const updateInscricao = async (req, res) => {
   });
 
   try {
+    const userId = req.userId;
+
     // Verifica se o ID foi passado
     if (!id) {
       return res.status(400).json({ error: 'ID do participante não informado.' });
+    }
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Não autorizado.' });
+    }
+
+    const [usuario, participanteExistente] = await Promise.all([
+      prisma.users.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true },
+      }),
+      prisma.participante2025.findUnique({
+        where: { id },
+        select: { id: true, userId: true },
+      }),
+    ]);
+
+    if (!usuario) {
+      return res.status(404).json({ error: 'Usuário não encontrado.' });
+    }
+
+    if (!participanteExistente) {
+      return res.status(404).json({ error: 'Participante não encontrado.' });
+    }
+
+    const isAdmin = usuario.role === 'admin';
+    const isOwner = participanteExistente.userId === userId;
+
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ error: 'Acesso não autorizado.' });
     }
 
     const participanteAtualizado = await prisma.participante2025.update({
