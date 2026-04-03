@@ -1,64 +1,41 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const dotenv = require('dotenv');
 
 dotenv.config();
 
-const port = Number(process.env.MAIL_PORT);
-const secure = port === 465;
-const connectionTimeout = Number(process.env.MAIL_CONNECTION_TIMEOUT || 10000);
-const greetingTimeout = Number(process.env.MAIL_GREETING_TIMEOUT || 10000);
-const socketTimeout = Number(process.env.MAIL_SOCKET_TIMEOUT || 15000);
-const hasRequiredConfig = Boolean(
-  process.env.MAIL_HOST &&
-    port &&
-    process.env.MAIL_USER &&
-    process.env.MAIL_PASS
-);
-
-const transporter = nodemailer.createTransport({
-  host: process.env.MAIL_HOST,
-  port,
-  secure,
-  connectionTimeout,
-  greetingTimeout,
-  socketTimeout,
-  auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASS,
-  },
-});
+const resendApiKey = process.env.RESEND_API_KEY;
+const defaultFromEmail =
+  process.env.RESEND_FROM_EMAIL ||
+  process.env.MAIL_FROM ||
+  'COMEJACA <onboarding@resend.dev>';
+const hasRequiredConfig = Boolean(resendApiKey);
+const resend = hasRequiredConfig ? new Resend(resendApiKey) : null;
 
 async function verifyMailerConnection() {
-  if (!hasRequiredConfig || process.env.ENABLE_SMTP === 'false') {
-    console.log('Verificação SMTP ignorada.', {
-      enabled: process.env.ENABLE_SMTP !== 'false',
+  if (!hasRequiredConfig) {
+    console.warn('Verificação de e-mail ignorada: RESEND_API_KEY não configurada.', {
       hasRequiredConfig,
+      hasFromEmail: Boolean(defaultFromEmail),
     });
     return false;
   }
 
   try {
-    await transporter.verify();
-    console.log('Conexão SMTP bem-sucedida!', {
-      host: process.env.MAIL_HOST,
-      port,
-      secure,
-      connectionTimeout,
-      greetingTimeout,
-      socketTimeout,
-      userConfigured: Boolean(process.env.MAIL_USER),
-      passConfigured: Boolean(process.env.MAIL_PASS),
+    console.log('Provedor de e-mail configurado com sucesso.', {
+      provider: 'resend',
       hasRequiredConfig,
+      hasFromEmail: Boolean(defaultFromEmail),
     });
     return true;
   } catch (error) {
-    console.error('Erro ao conectar no SMTP:', error);
+    console.error('Erro ao validar configuração de e-mail:', error);
     return false;
   }
 }
 
 module.exports = {
-  transporter,
+  resend,
   verifyMailerConnection,
   hasRequiredConfig,
+  defaultFromEmail,
 };

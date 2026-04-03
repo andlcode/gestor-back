@@ -114,7 +114,7 @@ const server = app.listen(process.env.PORT || 4000, () => {
 
   if (process.env.NODE_ENV !== 'production') {
     verifyMailerConnection().catch((error) => {
-      console.error('Falha não bloqueante na verificação SMTP:', error)
+      console.error('Falha não bloqueante na verificação do provedor de e-mail:', error)
     })
   }
 })

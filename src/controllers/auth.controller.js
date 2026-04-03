@@ -1424,6 +1424,12 @@ const enviarEmailRedefinicao = async (req, res) => {
     message: RESET_PASSWORD_REQUEST_MESSAGE,
   };
 
+  console.log('Entrou em forgot-password', {
+    method: req.method,
+    originalUrl: req.originalUrl,
+    body: req.body,
+    origin: req.headers.origin || null,
+  });
   console.log('Iniciando requisição de forgot-password');
 
   if (!email || typeof email !== 'string') {
