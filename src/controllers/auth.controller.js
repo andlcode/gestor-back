@@ -554,7 +554,7 @@ const changePassword = async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    console.log('Login bem-sucedido. Retornando token e dados do usuário...');
+    console.log('Login bem-sucedido. Retornando token e dados   do usuário...');
     return res.json({
       message: MESSAGES.success.loggedIn,
       token,

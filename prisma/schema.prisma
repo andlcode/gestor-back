@@ -63,6 +63,26 @@ model InstituicaoEspirita {
   @@map("InstituicaoEspirita")
 }
 
+model Evento {
+  id                       Int      @id @default(autoincrement())
+  nome                     String
+  nomeExibicao             String?
+  nomeCompleto             String?
+  ano                      Int
+  dataInicio               DateTime
+  dataFim                  DateTime?
+  localNome                String
+  localEndereco            String?
+  valorTrabalhador         Float?
+  valorConfraternista      Float?
+  valorPequenoCompanheiro  Float?
+  ativo                    Boolean  @default(false)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@map("Evento")
+}
+
 model Participante2025 {
   id                           String               @id @default(uuid())
   nomeCompleto                 String

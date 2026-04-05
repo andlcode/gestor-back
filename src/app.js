@@ -5,6 +5,7 @@ const dotenv = require('dotenv');
 
 const { PrismaClient } = require('@prisma/client');
 const authRoutes = require('./routes/auth.routes');
+const eventoRoutes = require('./routes/evento.routes');
 const { verifyMailerConnection } = require('./config/mailer');
 
 // Configuração inicial
@@ -77,6 +78,7 @@ app.use(express.urlencoded({ extended: true }))
 
 
 app.use('/api/auth', authRoutes)
+app.use('/api/evento', eventoRoutes)
 app.get('/api/health', async (req, res) => {
   let database = 'UP'
 
