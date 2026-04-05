@@ -1479,10 +1479,27 @@ const obterInscricao = async (req, res) => {
       return res.status(403).json({ error: 'Acesso não autorizado' });
     }
 
+    const evento = await prisma.evento.findFirst({
+      where: { ativo: true },
+      select: {
+        nome: true,
+        nomeExibicao: true,
+        nomeCompleto: true,
+        ano: true,
+        dataInicio: true,
+        dataFim: true,
+        localNome: true,
+        localEndereco: true,
+      },
+    });
+
     return res.status(200).json({
       success: true,
       message: "Dados da inscrição encontrados com sucesso!",
-      data: inscricao
+      data: {
+        ...inscricao,
+        evento: evento || null,
+      }
     });
 
   } catch (error) {
