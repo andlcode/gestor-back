@@ -5,6 +5,7 @@ const EMPTY_EVENT = {
   nomeExibicao: '',
   nomeCompleto: '',
   ano: '',
+  tema: '',
   dataInicio: '',
   dataFim: '',
   localNome: '',
@@ -25,6 +26,7 @@ const formatEvento = (evento) => {
     nome: evento.nome || '',
     nomeExibicao: evento.nomeExibicao || '',
     nomeCompleto: evento.nomeCompleto || '',
+    tema: evento.tema || '',
     ano: evento.ano != null ? String(evento.ano) : '',
     dataInicio: evento.dataInicio ? evento.dataInicio.toISOString().slice(0, 10) : '',
     dataFim: evento.dataFim ? evento.dataFim.toISOString().slice(0, 10) : '',
@@ -148,6 +150,7 @@ const updateEvento = async (req, res) => {
       nome,
       nomeExibicao: parseOptionalString(req.body?.nomeExibicao),
       nomeCompleto: parseOptionalString(req.body?.nomeCompleto),
+      tema: parseOptionalString(req.body?.tema),
       ano: anoNumero,
       dataInicio,
       dataFim,
@@ -158,7 +161,7 @@ const updateEvento = async (req, res) => {
       valorPequenoCompanheiro,
       ativo: true,
     };
-
+    
     const updatedEvento = await prisma.$transaction(async (tx) => {
       const eventoAtivo = await tx.evento.findFirst({
         where: { ativo: true },

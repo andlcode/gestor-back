@@ -18,6 +18,7 @@ const {
 } = require('../services/passwordReset.service');
 
 const prisma = new PrismaClient();
+const { getValorInscricao, loadEventoAtivoParaValor } = require('../utils/inscricaoValor');
 
 dotenv.config();
 const BASE_URL = process.env.BASE_URL;
@@ -37,6 +38,24 @@ const getFrontendBaseUrl = () => {
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 const hasAdminAccess = (role) => role === 'admin' || role === 'admin_total';
 const isAdminTotalRole = (role) => role === 'admin_total';
+
+const ANO_INSCRICAO_MIN = 1990;
+const ANO_INSCRICAO_MAX = 2100;
+
+/** Ano da inscrição = ano civil de `createdAt` (não existe coluna `ano` no modelo). */
+const parseAnoInscricaoQuery = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  const y = parseInt(String(value), 10);
+  if (!Number.isFinite(y) || y < ANO_INSCRICAO_MIN || y > ANO_INSCRICAO_MAX) return null;
+  return y;
+};
+
+const createdAtLocalCalendarYearWhere = (ano) => ({
+  createdAt: {
+    gte: new Date(`${ano}-01-01`),
+    lt: new Date(`${Number(ano) + 1}-01-01`),
+  },
+});
 
 const getPaymentStatusForStorage = (mercadoPagoStatus) => {
   const normalizedStatus = String(mercadoPagoStatus || '').trim().toLowerCase();
@@ -63,34 +82,53 @@ const buildFrontendStatusUrls = () => {
   };
 };
 
-const buildMercadoPagoPreferenceData = ({ participante, valor, notificationUrl }) => ({
-  items: [
-    {
-      title: `COMEJACA 2026 - ${participante.nomeCompleto}`,
-      description: `Inscrição de ${participante.nomeCompleto}`,
-      quantity: 1,
-      currency_id: 'BRL',
-      unit_price: valor,
+const buildMercadoPagoPreferenceData = ({ participante, valor, notificationUrl }) => {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isLocalhostFrontend =
+    !FRONTEND_URL ||
+    String(FRONTEND_URL).includes('localhost') ||
+    String(FRONTEND_URL).includes('127.0.0.1');
+
+  const baseUrl = getFrontendBaseUrl();
+
+  const preferenceData = {
+    items: [
+      {
+        title: `COMEJACA 2026 - ${participante.nomeCompleto}`,
+        description: `Inscrição de ${participante.nomeCompleto}`,
+        quantity: 1,
+        currency_id: 'BRL',
+        unit_price: valor,
+      },
+    ],
+    payer: {
+      name: participante.nomeCompleto,
+      email: participante.email,
     },
-  ],
-  payer: {
-    name: participante.nomeCompleto,
-    email: participante.email,
-  },
-  external_reference: String(participante.id),
-  metadata: {
-    participanteId: String(participante.id),
-    nomeParticipante: participante.nomeCompleto,
-  },
-  payment_methods: {
-    excluded_payment_methods: [{ id: 'ticket' }, { id: 'atm' }],
-    excluded_payment_types: [{ id: 'ticket' }],
-    installments: 1,
-  },
-  notification_url: notificationUrl,
-  back_urls: buildFrontendStatusUrls(),
-  auto_return: 'approved',
-});
+    external_reference: String(participante.id),
+    metadata: {
+      participanteId: String(participante.id),
+      nomeParticipante: participante.nomeCompleto,
+    },
+    payment_methods: {
+      excluded_payment_methods: [{ id: 'ticket' }, { id: 'atm' }],
+      excluded_payment_types: [{ id: 'ticket' }],
+      installments: 1,
+    },
+    notification_url: notificationUrl,
+    back_urls: {
+      success: `${baseUrl}/pagamento-sucesso`,
+      failure: `${baseUrl}/pagamento-erro`,
+      pending: `${baseUrl}/pagamento-pendente`,
+    },
+  };
+
+  if (isProduction && !isLocalhostFrontend) {
+    preferenceData.auto_return = 'approved';
+  }
+
+  return preferenceData;
+};
 
 const logMercadoPagoTokenStatus = (context) => {
   const token = process.env.MERCADOPAGO_ACCESS_TOKEN || '';
@@ -103,11 +141,6 @@ const logMercadoPagoTokenStatus = (context) => {
     isTestToken: normalized.startsWith('TEST-'),
     length: normalized.length,
   });
-};
-
-const calcularValorInscricao = (dataNascimento) => {
-  const idade = calcularIdade(dataNascimento);
-  return idade < 11 ? 45 : 60;
 };
 
 // Constantes atualizadas para mensagens
@@ -629,33 +662,6 @@ const changePassword = async (req, res) => {
 
 
 
-const calcularIdade = (dataNascimento) => {
-  // Data de referência para cálculo da idade (19/07/2025)
-  const dataReferencia = new Date('2025-07-19');
-  
-  // Cria um objeto Date com a data de nascimento fornecida
-  const nascimento = new Date(dataNascimento);
-
-  // Calcula a diferença em anos
-  let idade = dataReferencia.getFullYear() - nascimento.getFullYear();
-
-  // Ajusta caso o aniversário do usuário ainda não tenha ocorrido no ano de 2025
-  const mesReferencia = dataReferencia.getMonth();
-  const mesNascimento = nascimento.getMonth();
-  const diaReferencia = dataReferencia.getDate();
-  const diaNascimento = nascimento.getDate();
-
-  if (
-    mesReferencia < mesNascimento ||
-    (mesReferencia === mesNascimento && diaReferencia < diaNascimento)
-  ) {
-    idade--; // Se o aniversário ainda não passou, subtrai um ano
-  }
-
-  return idade;
-};
-
-
 const mercadopago = require('mercadopago');
 
 
@@ -772,8 +778,25 @@ const participante = async (req, res) => {
     };
 
     // O link de pagamento e gerado apenas sob demanda no botao "Pagar".
-    dadosParticipante.valor = calcularValorInscricao(dadosParticipante.dataNascimento);
+    const eventoAtivo = await loadEventoAtivoParaValor(prisma);
+    const valorInscricao = getValorInscricao({
+      inscricao: {
+        dataNascimento: dadosParticipante.dataNascimento,
+        tipoParticipacao: dadosParticipante.tipoParticipacao,
+      },
+      evento: eventoAtivo,
+    });
+    dadosParticipante.valor = valorInscricao.valor;
     dadosParticipante.linkPagamento = null;
+    console.log('[MercadoPago][participante] valor inscrição (evento)', {
+      participanteId,
+      eventoId: eventoAtivo?.id ?? null,
+      dataNascimento: dadosParticipante.dataNascimento,
+      tipoParticipacao: dadosParticipante.tipoParticipacao,
+      idadeNaDataEvento: valorInscricao.idadeNaDataEvento,
+      regra: valorInscricao.regra,
+      valor: valorInscricao.valor,
+    });
     dadosParticipante.statusPagamento = 'pendente';
 
     // Salvar participante no banco
@@ -868,6 +891,7 @@ const gerarNovoLinkPagamento = async (id) => {
       select: {
         id: true,
         dataNascimento: true,
+        tipoParticipacao: true,
         email: true,
         nomeCompleto: true,
         linkPagamento: true,
@@ -881,7 +905,8 @@ const gerarNovoLinkPagamento = async (id) => {
       throw new Error('Participante não encontrado para esse ID.');
     }
 
-    const { email, nomeCompleto, dataNascimento, linkPagamento, statusPagamento } = participante;
+    const { email, nomeCompleto, dataNascimento, linkPagamento, statusPagamento, tipoParticipacao } =
+      participante;
 
     if (!email || !nomeCompleto || !dataNascimento) {
       throw new Error('Dados do participante incompletos.');
@@ -914,7 +939,22 @@ const gerarNovoLinkPagamento = async (id) => {
       };
     }
 
-    const valor = calcularValorInscricao(dataNascimento);
+    const eventoAtivo = await loadEventoAtivoParaValor(prisma);
+    const valorInscricao = getValorInscricao({
+      inscricao: { dataNascimento, tipoParticipacao },
+      evento: eventoAtivo,
+    });
+    const valor = valorInscricao.valor;
+    console.log('[MercadoPago][gerarNovoLinkPagamento] cálculo valor', {
+      id: participante.id,
+      eventoId: eventoAtivo?.id ?? null,
+      dataInicioEvento: eventoAtivo?.dataInicio ?? null,
+      dataNascimento,
+      tipoParticipacao,
+      idadeNaDataEvento: valorInscricao.idadeNaDataEvento,
+      regra: valorInscricao.regra,
+      valor,
+    });
 
     const preferenceData = buildMercadoPagoPreferenceData({
       participante: {
@@ -925,8 +965,20 @@ const gerarNovoLinkPagamento = async (id) => {
       valor,
       notificationUrl: `${process.env.BASE_URL}/api/auth/mercadopago/notificacao`,
     });
-    console.log('FRONTEND_URL:', getFrontendBaseUrl());
-    console.log('Preference enviada:', preferenceData);
+
+    const isLocalhostFrontend =
+      !FRONTEND_URL ||
+      String(FRONTEND_URL).includes('localhost') ||
+      String(FRONTEND_URL).includes('127.0.0.1');
+
+    console.log('[MercadoPago] NODE_ENV:', process.env.NODE_ENV);
+    console.log('[MercadoPago] FRONTEND_URL:', FRONTEND_URL);
+    console.log('[MercadoPago] isLocalhostFrontend:', isLocalhostFrontend);
+    console.log(
+      '[MercadoPago] auto_return presente?',
+      Object.prototype.hasOwnProperty.call(preferenceData, 'auto_return')
+    );
+    console.log('[MercadoPago] preference final:', preferenceData);
 
     const mpResponse = await preference.create({ body: preferenceData });
     console.log('Resposta completa do Mercado Pago ao regenerar preferência:', mpResponse);
@@ -987,6 +1039,11 @@ const updateInscricao = async (req, res) => {
     statusPagamentoIgnorado: req.body?.statusPagamento || null,
     dataPagamentoIgnorado: req.body?.dataPagamento || null,
   });
+  console.log('[nomeCracha][back] updateInscricao', {
+    bodyNomeCracha: req.body?.nomeCracha,
+    dadosParticipanteNomeCracha: dadosParticipante?.nomeCracha,
+    dadosParticipanteKeys: Object.keys(dadosParticipante || {}),
+  });
 
   try {
     const userId = req.userId;
@@ -1007,7 +1064,14 @@ const updateInscricao = async (req, res) => {
       }),
       prisma.participante2025.findUnique({
         where: { id },
-        select: { id: true, userId: true },
+        select: {
+          id: true,
+          userId: true,
+          dataNascimento: true,
+          tipoParticipacao: true,
+          linkPagamento: true,
+          statusPagamento: true,
+        },
       }),
     ]);
 
@@ -1026,14 +1090,66 @@ const updateInscricao = async (req, res) => {
       return res.status(403).json({ error: 'Acesso não autorizado.' });
     }
 
+    const prismaUpdateData = {
+      ...dadosParticipante,
+      ...(Object.prototype.hasOwnProperty.call(dadosParticipante, 'email')
+        ? { email: normalizeEmail(dadosParticipante.email) }
+        : {}),
+    };
+
+    const ts = (d) => (d == null ? null : new Date(d).getTime());
+    const birthChanged =
+      prismaUpdateData.dataNascimento !== undefined &&
+      ts(participanteExistente.dataNascimento) !== ts(prismaUpdateData.dataNascimento);
+    const tipoChanged =
+      prismaUpdateData.tipoParticipacao !== undefined &&
+      String(participanteExistente.tipoParticipacao || '') !==
+        String(prismaUpdateData.tipoParticipacao || '');
+
+    if (
+      (birthChanged || tipoChanged) &&
+      participanteExistente.statusPagamento !== 'pago'
+    ) {
+      const nextBirth =
+        prismaUpdateData.dataNascimento !== undefined
+          ? new Date(prismaUpdateData.dataNascimento)
+          : participanteExistente.dataNascimento;
+      const nextTipo =
+        prismaUpdateData.tipoParticipacao !== undefined
+          ? prismaUpdateData.tipoParticipacao
+          : participanteExistente.tipoParticipacao;
+
+      prismaUpdateData.linkPagamento = null;
+      const eventoAtivo = await loadEventoAtivoParaValor(prisma);
+      const recalculo = getValorInscricao({
+        inscricao: {
+          dataNascimento: nextBirth,
+          tipoParticipacao: nextTipo,
+        },
+        evento: eventoAtivo,
+      });
+      prismaUpdateData.valor = recalculo.valor;
+
+      console.log('[MercadoPago][updateInscricao] link limpo (data nascimento ou tipo alterado)', {
+        id,
+        birthChanged,
+        tipoChanged,
+        statusPagamento: participanteExistente.statusPagamento,
+        idadeNaDataEvento: recalculo.idadeNaDataEvento,
+        regra: recalculo.regra,
+        novoValor: recalculo.valor,
+        eventoId: eventoAtivo?.id ?? null,
+      });
+    }
+
+    console.log('[nomeCracha][back] objeto enviado ao Prisma (data)', {
+      nomeCracha: prismaUpdateData.nomeCracha,
+      keys: Object.keys(prismaUpdateData),
+    });
+
     const participanteAtualizado = await prisma.participante2025.update({
       where: { id },
-      data: {
-        ...dadosParticipante,
-        ...(Object.prototype.hasOwnProperty.call(dadosParticipante, 'email')
-          ? { email: normalizeEmail(dadosParticipante.email) }
-          : {}),
-      },
+      data: prismaUpdateData,
       select: {
         id: true,
         nomeCompleto: true,
@@ -1077,6 +1193,8 @@ const updateInscricao = async (req, res) => {
         otherInstitution: true
       },
     });
+
+    console.log('[nomeCracha][back] após Prisma update', participanteAtualizado?.nomeCracha);
 
     return res.status(200).json(participanteAtualizado);
 
@@ -1425,6 +1543,7 @@ const obterInscricao = async (req, res) => {
       select: {
         id: true,
         nomeCompleto: true,
+        nomeCracha: true,
         nomeSocial: true,
         dataNascimento: true,
         sexo: true,
@@ -1479,27 +1598,10 @@ const obterInscricao = async (req, res) => {
       return res.status(403).json({ error: 'Acesso não autorizado' });
     }
 
-    const evento = await prisma.evento.findFirst({
-      where: { ativo: true },
-      select: {
-        nome: true,
-        nomeExibicao: true,
-        nomeCompleto: true,
-        ano: true,
-        dataInicio: true,
-        dataFim: true,
-        localNome: true,
-        localEndereco: true,
-      },
-    });
-
     return res.status(200).json({
       success: true,
       message: "Dados da inscrição encontrados com sucesso!",
-      data: {
-        ...inscricao,
-        evento: evento || null,
-      }
+      data: inscricao
     });
 
   } catch (error) {
@@ -1939,24 +2041,45 @@ const resetPassword = async (req, res) => {
   
   const listarParticipantes = async (req, res) => {
     try {
-      const participantes = await prisma.participante2025.findMany({
-        select: {
-          id: true,
-          nomeCompleto: true,
-          IE: true,
-          statusPagamento: true,
-          linkPagamento: true,
-          tipoParticipacao:true, 
-          comissao: true,
-          dataNascimento: true,
-          IE: true
+      const ano = parseAnoInscricaoQuery(req.query.ano);
+      console.log('[FILTRO ANO]', ano, typeof ano);
 
-        },
-      });
-  
+      const where = ano != null ? createdAtLocalCalendarYearWhere(ano) : {};
+
+      const [participantes, anosRows] = await Promise.all([
+        prisma.participante2025.findMany({
+          where,
+          orderBy: { nomeCompleto: 'asc' },
+          select: {
+            id: true,
+            nomeCompleto: true,
+            IE: true,
+            statusPagamento: true,
+            linkPagamento: true,
+            tipoParticipacao: true,
+            comissao: true,
+            dataNascimento: true,
+          },
+        }),
+        prisma.$queryRaw`
+          SELECT DISTINCT (EXTRACT(YEAR FROM ("createdAt" AT TIME ZONE 'UTC')))::INTEGER AS year
+          FROM "Participantes2025"
+          WHERE "createdAt" IS NOT NULL
+          ORDER BY year DESC
+        `,
+      ]);
+
+      const anosDisponiveis = (Array.isArray(anosRows) ? anosRows : [])
+        .map((row) => Number(row.year))
+        .filter((y) => Number.isFinite(y) && y >= ANO_INSCRICAO_MIN && y <= ANO_INSCRICAO_MAX);
+
       return res.status(200).json({
         success: true,
         data: participantes,
+        meta: {
+          anoFiltro: ano,
+          anosDisponiveis,
+        },
       });
     } catch (error) {
       console.error('Erro ao listar participantes:', error);
