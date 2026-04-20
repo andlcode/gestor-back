@@ -38,7 +38,7 @@ const loadEventoAtivoParaValor = async (prismaClient) =>
 
 /**
  * Valor da inscrição conforme tabela Evento e dados da inscrição.
- * Ordem: (1) até 11 anos na data de início do evento → valorPequenoCompanheiro;
+ * Ordem: (1) até 10 anos na data de início do evento → valorPequenoCompanheiro (Plano Geral 2026: 3 a 10 anos);
  * (2) Trabalhador → valorTrabalhador; (3) demais (ex. Confraternista) → valorConfraternista.
  *
  * @param {{ dataNascimento: Date|string, tipoParticipacao?: string|null }} inscricao
@@ -55,7 +55,7 @@ const getValorInscricao = ({ inscricao, evento }) => {
     evento.dataInicio
   );
 
-  if (idadeNaDataEvento !== null && idadeNaDataEvento <= 11) {
+  if (idadeNaDataEvento !== null && idadeNaDataEvento <= 10) {
     return {
       valor: safeFloat(evento.valorPequenoCompanheiro),
       regra: 'pequeno_companheiro',

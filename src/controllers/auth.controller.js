@@ -1225,6 +1225,7 @@ const getparticipantes = async (req, res) => {
         id: true,
         nomeCompleto: true,
         IE: true,
+        otherInstitution: true,
         createdAt: true,
         tipoParticipacao: true,
         statusPagamento: true,
