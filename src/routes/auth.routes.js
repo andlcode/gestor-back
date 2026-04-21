@@ -40,6 +40,7 @@ const {
   validateLogin,
   validateRegister,
   validateVerification,
+  validateRequest,
 } = require('../../validators/authValidator.js');
 
 const router = express.Router();
@@ -55,8 +56,8 @@ router.use((req, res, next) => {
 /* =========================
    ROTAS PÚBLICAS
 ========================= */
-router.post('/entrar', validateLogin, login);
-router.post('/registrar', validateRegister, register);
+router.post('/entrar', validateLogin, validateRequest, login);
+router.post('/registrar', validateRegister, validateRequest, register);
 
 /* =========================
    RECUPERAÇÃO DE SENHA
@@ -73,7 +74,13 @@ router.post('/reset-password', resetPassword);
 /* =========================
    ROTAS AUTENTICADAS
 ========================= */
-router.post('/verificar', isAuthenticated, validateVerification, verificar);
+router.post(
+  '/verificar',
+  isAuthenticated,
+  validateVerification,
+  validateRequest,
+  verificar
+);
 router.post('/enviarcodigo', isAuthenticated, resendVerificationCode);
 router.post('/validartoken', isAuthenticated, validateToken);
 

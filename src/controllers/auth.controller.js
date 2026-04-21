@@ -19,6 +19,12 @@ const {
 
 const prisma = new PrismaClient();
 const { getValorInscricao, loadEventoAtivoParaValor } = require('../utils/inscricaoValor');
+const {
+  meetsNewPasswordPolicy,
+  NEW_PASSWORD_POLICY_MESSAGE,
+} = require('../utils/passwordPolicy');
+
+const isAuthFlowDebug = () => process.env.AUTH_FLOW_DEBUG === '1';
 
 dotenv.config();
 const BASE_URL = process.env.BASE_URL;
@@ -414,18 +420,25 @@ const RESEND_INTERVAL = 60000; // 60 segundos
   try {
     const normalizedEmail = normalizeEmail(email);
 
-    const isStrongPassword = (password) => {
-      const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&.])[A-Za-z\d@$!%*?&.]{8,}$/;
-      return strongPasswordRegex.test(password);
-    };
-    
+    if (isAuthFlowDebug()) {
+      const body = req.body || {};
+      console.log('[auth:register]', {
+        bodyKeys: Object.keys(body),
+        hasPasswordField: Object.prototype.hasOwnProperty.call(body, 'password'),
+        passwordType: password === undefined ? 'undefined' : typeof password,
+        passwordLength: typeof password === 'string' ? password.length : null,
+        meetsNewPasswordPolicy:
+          typeof password === 'string' ? meetsNewPasswordPolicy(password) : false,
+      });
+    }
+
     // Validação dos campos
     if (!name || !normalizedEmail || !password) {
       return res.status(400).json({ error: MESSAGES.errors.missingFields });
     }
-    if (!isStrongPassword(password)) {
+    if (!meetsNewPasswordPolicy(password)) {
       return res.status(400).json({
-        error: "A senha deve conter pelo menos 8 caracteres, incluindo uma letra maiúscula, uma minúscula, um número e um caractere especial.",
+        error: NEW_PASSWORD_POLICY_MESSAGE,
       });
     }
     // Verifica usuário existente
@@ -504,11 +517,6 @@ const changePassword = async (req, res) => {
     return res.status(403).json({ error: "Acesso negado. Apenas administradores podem alterar senhas." });
   }
 
-  const isStrongPassword = (password) => {
-    const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&.])[A-Za-z\d@$!%*?&.]{8,}$/;
-    return regex.test(password);
-  };
-
   try {
     const normalizedEmail = normalizeEmail(email);
 
@@ -516,9 +524,9 @@ const changePassword = async (req, res) => {
       return res.status(400).json({ error: "E-mail e nova senha são obrigatórios." });
     }
 
-    if (!isStrongPassword(newPassword)) {
+    if (!meetsNewPasswordPolicy(newPassword)) {
       return res.status(400).json({
-        error: "A nova senha deve conter pelo menos 8 caracteres, incluindo uma letra maiúscula, uma minúscula, um número e um caractere especial."
+        error: NEW_PASSWORD_POLICY_MESSAGE,
       });
     }
 
@@ -554,7 +562,17 @@ const changePassword = async (req, res) => {
 
   try {
     const normalizedEmail = normalizeEmail(email);
-    console.log('Buscando usuário no banco de dados...');
+
+    if (isAuthFlowDebug()) {
+      const body = req.body || {};
+      console.log('[auth:login]', {
+        bodyKeys: Object.keys(body),
+        hasPasswordField: Object.prototype.hasOwnProperty.call(body, 'password'),
+        passwordLength: typeof password === 'string' ? password.length : null,
+        emailNormalizedLength: normalizedEmail.length,
+      });
+    }
+
     const user = await prisma.users.findFirst({
       where: {
         email: {
@@ -565,29 +583,38 @@ const changePassword = async (req, res) => {
     });
 
     if (!user) {
-      console.log('Usuário não encontrado:', normalizedEmail);
+      if (isAuthFlowDebug()) {
+        console.log('[auth:login] usuário não encontrado (email normalizado, tamanho):', normalizedEmail.length);
+      }
       return res.status(404).json({ error: MESSAGES.errors.userNotFound });
     }
 
-    console.log('Usuário encontrado:', user);
+    if (isAuthFlowDebug()) {
+      console.log('[auth:login] usuário encontrado:', {
+        id: user.id,
+        email: user.email,
+        storedPasswordLen: typeof user.password === 'string' ? user.password.length : null,
+        isVerified: user.isVerified,
+      });
+    }
 
-  
-
-    console.log('Verificando senha...');
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
-      console.log('Senha inválida para o usuário:', user.email);
+      if (isAuthFlowDebug()) {
+        console.log('[auth:login] senha incorreta (user id):', user.id);
+      }
       return res.status(401).json({ error: MESSAGES.errors.invalidCredentials });
     }
 
-    console.log('Gerando token JWT...');
     const token = jwt.sign(
       { id: user.id, email: user.email, isVerified: true },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    console.log('Login bem-sucedido. Retornando token e dados   do usuário...');
+    if (isAuthFlowDebug()) {
+      console.log('[auth:login] sucesso (user id):', user.id);
+    }
     return res.json({
       message: MESSAGES.success.loggedIn,
       token,
@@ -1752,15 +1779,9 @@ const resetPassword = async (req, res) => {
 
   const normalizedPassword = newPassword.trim();
 
-  if (normalizedPassword.length < 8) {
+  if (!meetsNewPasswordPolicy(normalizedPassword)) {
     return res.status(400).json({
-      message: 'A nova senha deve ter pelo menos 8 caracteres.',
-    });
-  }
-
-  if (!/[A-Z]/.test(normalizedPassword)) {
-    return res.status(400).json({
-      message: 'Inclua pelo menos uma letra maiúscula na nova senha.',
+      message: NEW_PASSWORD_POLICY_MESSAGE,
     });
   }
 
@@ -2272,10 +2293,13 @@ const atualizarPerfil = async (req, res) => {
       updatedAt: new Date(),
     };
 
-    // Se a senha for fornecida, criptografa a nova senha
-    if (senha) {
-      const hashedPassword = await bcrypt.hash(senha, 10);
-      updateData.password = hashedPassword;
+    // Se a senha for fornecida, valida política de nova senha e criptografa
+    const senhaTrim = senha != null ? String(senha).trim() : '';
+    if (senhaTrim) {
+      if (!meetsNewPasswordPolicy(senhaTrim)) {
+        return res.status(400).json({ error: NEW_PASSWORD_POLICY_MESSAGE });
+      }
+      updateData.password = await bcrypt.hash(senhaTrim, 10);
     }
 
     const updatedUser = await prisma.users.update({
