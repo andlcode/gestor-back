@@ -1,0 +1,2 @@
+-- Migration reconstruída manualmente
+-- Mantida apenas para consistência do Prisma

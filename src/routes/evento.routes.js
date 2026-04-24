@@ -2,7 +2,11 @@ const express = require('express');
 
 const { isAuthenticated } = require('../middlewares/authMiddleware');
 const { requireAdminTotal } = require('../middlewares/requireAdminTotal');
-const { getEvento, updateEvento } = require('../controllers/evento.controller');
+const {
+  getEvento,
+  getEventoPublicCamisa,
+  updateEvento,
+} = require('../controllers/evento.controller');
 
 const router = express.Router();
 
@@ -11,6 +15,7 @@ router.use((req, res, next) => {
   next();
 });
 
+router.get('/public/camisa', getEventoPublicCamisa);
 router.get('/', isAuthenticated, requireAdminTotal, getEvento);
 router.put('/', isAuthenticated, requireAdminTotal, updateEvento);
 

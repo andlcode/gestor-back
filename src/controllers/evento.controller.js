@@ -13,6 +13,7 @@ const EMPTY_EVENT = {
   valorTrabalhador: '',
   valorConfraternista: '',
   valorPequenoCompanheiro: '',
+  camisaImagens: [],
   ativo: true,
   isNew: true,
 };
@@ -40,6 +41,9 @@ const formatEvento = (evento) => {
       evento.valorPequenoCompanheiro != null
         ? String(evento.valorPequenoCompanheiro)
         : '',
+    camisaImagens: Array.isArray(evento.camisaImagens)
+      ? evento.camisaImagens.map((u) => String(u || '').trim()).filter(Boolean)
+      : [],
     ativo: Boolean(evento.ativo),
     isNew: false,
   };
@@ -68,6 +72,57 @@ const parseDateField = (value) => {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const MAX_CAMISA_IMAGENS = 40;
+
+const parseCamisaImagens = (value) => {
+  if (value == null) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => String(v || '').trim())
+      .filter(Boolean)
+      .slice(0, MAX_CAMISA_IMAGENS);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, MAX_CAMISA_IMAGENS);
+  }
+  return [];
+};
+
+const getEventoPublicCamisa = async (req, res) => {
+  try {
+    const eventoAtivo = await prisma.evento.findFirst({
+      where: { ativo: true },
+      orderBy: { updatedAt: 'desc' },
+      select: { camisaImagens: true },
+    });
+
+    const camisaImagens = Array.isArray(eventoAtivo?.camisaImagens)
+      ? eventoAtivo.camisaImagens.map((u) => String(u || '').trim()).filter(Boolean)
+      : [];
+
+    return res.status(200).json({
+      success: true,
+      data: { camisaImagens },
+    });
+  } catch (error) {
+    console.error('[evento] erro ao buscar camisaImagens públicas:', {
+      message: error.message,
+      stack: error.stack,
+    });
+
+    return res.status(500).json({
+      success: false,
+      error: 'Erro ao buscar dados do evento.',
+    });
+  }
 };
 
 const getEvento = async (req, res) => {
@@ -159,6 +214,7 @@ const updateEvento = async (req, res) => {
       valorTrabalhador,
       valorConfraternista,
       valorPequenoCompanheiro,
+      camisaImagens: parseCamisaImagens(req.body?.camisaImagens),
       ativo: true,
     };
     
@@ -206,5 +262,6 @@ const updateEvento = async (req, res) => {
 
 module.exports = {
   getEvento,
+  getEventoPublicCamisa,
   updateEvento,
 };
