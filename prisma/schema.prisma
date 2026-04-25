@@ -143,6 +143,7 @@ model Participante2025 {
 
 model Participante2026 {
   id                           String               @id @default(uuid())
+  ativo Boolean                @default(true)
   nomeCompleto                 String
   nomeCracha                   String?
   cpf                          String?

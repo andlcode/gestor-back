@@ -14,6 +14,7 @@ const EMPTY_EVENT = {
   valorConfraternista: '',
   valorPequenoCompanheiro: '',
   camisaImagens: [],
+  camisaImagemUrl: '',
   ativo: true,
   isNew: true,
 };
@@ -22,6 +23,10 @@ const formatEvento = (evento) => {
   if (!evento) {
     return { ...EMPTY_EVENT };
   }
+
+  const camisaImagens = Array.isArray(evento.camisaImagens)
+    ? evento.camisaImagens.map((u) => String(u || '').trim()).filter(Boolean)
+    : [];
 
   return {
     nome: evento.nome || '',
@@ -41,9 +46,8 @@ const formatEvento = (evento) => {
       evento.valorPequenoCompanheiro != null
         ? String(evento.valorPequenoCompanheiro)
         : '',
-    camisaImagens: Array.isArray(evento.camisaImagens)
-      ? evento.camisaImagens.map((u) => String(u || '').trim()).filter(Boolean)
-      : [],
+    camisaImagens,
+    camisaImagemUrl: camisaImagens[0] || '',
     ativo: Boolean(evento.ativo),
     isNew: false,
   };
@@ -107,10 +111,11 @@ const getEventoPublicCamisa = async (req, res) => {
     const camisaImagens = Array.isArray(eventoAtivo?.camisaImagens)
       ? eventoAtivo.camisaImagens.map((u) => String(u || '').trim()).filter(Boolean)
       : [];
+    const camisaImagemUrl = camisaImagens[0] || '';
 
     return res.status(200).json({
       success: true,
-      data: { camisaImagens },
+      data: { camisaImagens, camisaImagemUrl },
     });
   } catch (error) {
     console.error('[evento] erro ao buscar camisaImagens públicas:', {

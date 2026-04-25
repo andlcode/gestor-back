@@ -1124,6 +1124,21 @@ const updateInscricao = async (req, res) => {
         : {}),
     };
 
+    if (Object.prototype.hasOwnProperty.call(prismaUpdateData, 'camisa')) {
+      const wants =
+        prismaUpdateData.camisa === true || prismaUpdateData.camisa === 'true';
+      prismaUpdateData.camisa = wants;
+      prismaUpdateData.tamanhoCamisa = wants
+        ? String(prismaUpdateData.tamanhoCamisa ?? '').trim() || null
+        : null;
+      if (wants && !prismaUpdateData.tamanhoCamisa) {
+        return res.status(400).json({
+          error: 'Dados inválidos',
+          details: [{ message: 'Informe o tamanho da camisa.' }],
+        });
+      }
+    }
+
     const ts = (d) => (d == null ? null : new Date(d).getTime());
     const birthChanged =
       prismaUpdateData.dataNascimento !== undefined &&
