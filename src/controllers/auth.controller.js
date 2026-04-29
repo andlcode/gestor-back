@@ -23,6 +23,10 @@ const {
   meetsNewPasswordPolicy,
   NEW_PASSWORD_POLICY_MESSAGE,
 } = require('../utils/passwordPolicy');
+const {
+  isCamisaTipoValid,
+  isCamisaCorValid,
+} = require('../constants/camisaParticipante');
 
 const isAuthFlowDebug = () => process.env.AUTH_FLOW_DEBUG === '1';
 
@@ -63,6 +67,10 @@ const createdAtLocalCalendarYearWhere = (ano) => ({
   },
 });
 
+/**
+ * Normaliza status oficial do pagamento (consultado na API do Mercado Pago)
+ * para o valor persistido em `Participantes2025.statusPagamento`.
+ */
 const getPaymentStatusForStorage = (mercadoPagoStatus) => {
   const normalizedStatus = String(mercadoPagoStatus || '').trim().toLowerCase();
 
@@ -72,7 +80,13 @@ const getPaymentStatusForStorage = (mercadoPagoStatus) => {
     case 'pending':
     case 'in_process':
     case 'in_mediation':
+    case 'authorized':
       return 'pendente';
+    case 'rejected':
+    case 'cancelled':
+    case 'refunded':
+    case 'charged_back':
+      return 'falhou';
     default:
       return 'N/A';
   }
@@ -718,10 +732,21 @@ const participante = async (req, res) => {
       .label('Comissão'),
     camisa: Joi.boolean().optional().label('Camisa'),
 
+    camisaTipo: Joi.when('camisa', {
+      is: true,
+      then: Joi.string().valid('algodao', 'poliester').required().label('Tipo da camisa'),
+      otherwise: Joi.string().allow(null, '').optional(),
+    }),
+    camisaCor: Joi.when('camisa', {
+      is: true,
+      then: Joi.string().valid('preto', 'branco').required().label('Cor da camisa'),
+      otherwise: Joi.string().allow(null, '').optional(),
+    }),
+
     tamanhoCamisa: Joi.when('camisa', {
       is: true,
-      then: Joi.string().required().label('Tamanho da Camisa'), 
-      otherwise: Joi.string().allow('').optional()
+      then: Joi.string().required().label('Tamanho da Camisa'),
+      otherwise: Joi.string().allow('', null).optional(),
     }),
 
     vegetariano: Joi.string().label('Vegetarianismo'),
@@ -804,6 +829,23 @@ const participante = async (req, res) => {
       documentoResponsavel: req.body.documentoResponsavel ? req.body.documentoResponsavel.replace(/\D/g, '') : '',
     };
 
+    const querCamisa = dadosParticipante.camisa === true;
+    if (!querCamisa) {
+      dadosParticipante.camisa = false;
+      dadosParticipante.tamanhoCamisa = null;
+      dadosParticipante.camisaTipo = null;
+      dadosParticipante.camisaCor = null;
+    } else {
+      dadosParticipante.tamanhoCamisa =
+        String(dadosParticipante.tamanhoCamisa || '').trim() || null;
+      dadosParticipante.camisaTipo = isCamisaTipoValid(dadosParticipante.camisaTipo)
+        ? String(dadosParticipante.camisaTipo).trim()
+        : null;
+      dadosParticipante.camisaCor = isCamisaCorValid(dadosParticipante.camisaCor)
+        ? String(dadosParticipante.camisaCor).trim()
+        : null;
+    }
+
     // O link de pagamento e gerado apenas sob demanda no botao "Pagar".
     const eventoAtivo = await loadEventoAtivoParaValor(prisma);
     const valorInscricao = getValorInscricao({
@@ -853,6 +895,8 @@ const participante = async (req, res) => {
         vegetariano: true,
         camisa: true,
         tamanhoCamisa: true,
+        camisaTipo: true,
+        camisaCor: true,
         primeiraComejaca: true,
         deficienciaAuditiva: true,
         deficienciaAutismo: true,
@@ -1098,6 +1142,10 @@ const updateInscricao = async (req, res) => {
           tipoParticipacao: true,
           linkPagamento: true,
           statusPagamento: true,
+          camisa: true,
+          tamanhoCamisa: true,
+          camisaTipo: true,
+          camisaCor: true,
         },
       }),
     ]);
@@ -1128,14 +1176,52 @@ const updateInscricao = async (req, res) => {
       const wants =
         prismaUpdateData.camisa === true || prismaUpdateData.camisa === 'true';
       prismaUpdateData.camisa = wants;
-      prismaUpdateData.tamanhoCamisa = wants
-        ? String(prismaUpdateData.tamanhoCamisa ?? '').trim() || null
-        : null;
-      if (wants && !prismaUpdateData.tamanhoCamisa) {
-        return res.status(400).json({
-          error: 'Dados inválidos',
-          details: [{ message: 'Informe o tamanho da camisa.' }],
-        });
+      if (!wants) {
+        prismaUpdateData.tamanhoCamisa = null;
+        prismaUpdateData.camisaTipo = null;
+        prismaUpdateData.camisaCor = null;
+      } else {
+        const tam = String(prismaUpdateData.tamanhoCamisa ?? '').trim() || null;
+        let tipo = String(prismaUpdateData.camisaTipo ?? '').trim() || null;
+        let cor = String(prismaUpdateData.camisaCor ?? '').trim() || null;
+        if (!tam) {
+          return res.status(400).json({
+            error: 'Dados inválidos',
+            details: [{ message: 'Informe o tamanho da camisa.' }],
+          });
+        }
+        const pago = participanteExistente.statusPagamento === 'pago';
+        const dbSemTipoCor =
+          !String(participanteExistente.camisaTipo || '').trim() &&
+          !String(participanteExistente.camisaCor || '').trim();
+        const clienteSemTipoCor = !tipo && !cor;
+        const legadoPagoSemTipoCor =
+          pago && dbSemTipoCor && clienteSemTipoCor;
+        const tipoInvalido = !isCamisaTipoValid(tipo);
+        const corInvalido = !isCamisaCorValid(cor);
+
+        if (tipoInvalido || corInvalido) {
+          if (legadoPagoSemTipoCor) {
+            tipo = null;
+            cor = null;
+          } else {
+            if (tipoInvalido) {
+              return res.status(400).json({
+                error: 'Dados inválidos',
+                details: [{ message: 'Selecione o tipo da camisa.' }],
+              });
+            }
+            if (corInvalido) {
+              return res.status(400).json({
+                error: 'Dados inválidos',
+                details: [{ message: 'Selecione a cor da camisa.' }],
+              });
+            }
+          }
+        }
+        prismaUpdateData.tamanhoCamisa = tam;
+        prismaUpdateData.camisaTipo = tipo;
+        prismaUpdateData.camisaCor = cor;
       }
     }
 
@@ -1216,6 +1302,8 @@ const updateInscricao = async (req, res) => {
         vegetariano: true,
         camisa: true,
         tamanhoCamisa: true,
+        camisaTipo: true,
+        camisaCor: true,
         primeiraComejaca: true,
         deficienciaAuditiva: true,
         deficienciaAutismo: true,
@@ -1599,6 +1687,8 @@ const obterInscricao = async (req, res) => {
         comissao: true,
         camisa: true,
         tamanhoCamisa: true,
+        camisaTipo: true,
+        camisaCor: true,
         cep: true,
         estado: true,
         cidade: true,
@@ -2166,46 +2256,89 @@ const atendimentoFraterno = async (req, res) => {
 };
 
   const notificacao = async (req, res) => {
+    const method = req.method;
+    const topicRaw =
+      req.body?.type ||
+      req.query?.type ||
+      req.query?.topic ||
+      (typeof req.body?.action === 'string' ? req.body.action.split('.')[0] : null);
+    const topic = String(topicRaw || '').toLowerCase();
+
+    const paymentIdRaw =
+      req.body?.data?.id ??
+      req.query?.['data.id'] ??
+      req.query?.id ??
+      req.query?.['data[id]'];
+    const paymentId =
+      paymentIdRaw != null && paymentIdRaw !== '' ? String(paymentIdRaw).trim() : '';
+
     try {
-      console.log('Webhook Mercado Pago recebido:', {
-        body: req.body,
-        query: req.query,
+      console.log('[MercadoPago][webhook] evento recebido', {
+        method,
+        topicOriginal: topicRaw,
+        topicNormalizado: topic,
+        paymentIdRecebido: paymentId || null,
+        queryKeys: req.query ? Object.keys(req.query) : [],
+        bodyType: req.body?.type,
+        bodyAction: req.body?.action,
       });
 
-      const paymentId = req.body?.data?.id || req.query['data.id'] || req.query.id;
-      const topic = req.body?.type || req.query.type || req.body?.action?.split('.')?.[0];
-
       if (topic !== 'payment') {
+        console.log('[MercadoPago][webhook] notificação ignorada (topic !== payment)', {
+          topic,
+        });
         return res.status(200).send('Notificação ignorada');
       }
 
       if (!paymentId) {
-        console.warn('Webhook sem payment id.');
+        console.warn('[MercadoPago][webhook] payment id ausente', { method, query: req.query });
         return res.status(400).send('Payment id ausente');
       }
-  
-      const client = new mercadopago.MercadoPagoConfig({
-        accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN,
-      });
-  
-      const payment = await mercadopago.Payment.findById(client, paymentId);
-      const paymentInfo = payment?.body || payment;
-  
-      const mercadoPagoStatus = paymentInfo.status;
+
+      const accessToken = String(process.env.MERCADOPAGO_ACCESS_TOKEN || '').trim();
+      if (!accessToken) {
+        console.error('[MercadoPago][webhook] MERCADOPAGO_ACCESS_TOKEN não configurado');
+        return res.status(500).send('Configuração MP ausente');
+      }
+
+      const client = new mercadopago.MercadoPagoConfig({ accessToken });
+      const paymentClient = new mercadopago.Payment(client);
+      const paymentInfo = await paymentClient.get({ id: paymentId });
+
+      if (!paymentInfo || typeof paymentInfo !== 'object') {
+        console.error('[MercadoPago][webhook] resposta vazia da API de pagamentos', {
+          paymentId,
+        });
+        return res.status(502).send('Resposta MP inválida');
+      }
+
+      const mercadoPagoStatus = String(paymentInfo.status || '').trim().toLowerCase();
+      if (!mercadoPagoStatus) {
+        console.error('[MercadoPago][webhook] pagamento sem status na API MP', {
+          paymentId,
+          id: paymentInfo.id,
+        });
+        return res.status(502).send('Status MP ausente');
+      }
+
       const statusPagamento = getPaymentStatusForStorage(mercadoPagoStatus);
       const participanteId = String(
         paymentInfo.external_reference || paymentInfo.metadata?.participanteId || ''
       ).trim();
 
-      console.log('Detalhes do pagamento recebidos:', {
+      console.log('[MercadoPago][webhook] pagamento consultado na API MP', {
         paymentId,
-        external_reference: paymentInfo.external_reference,
-        metadataParticipanteId: paymentInfo.metadata?.participanteId,
-        statusMercadoPago: mercadoPagoStatus,
+        statusMp: mercadoPagoStatus,
         statusNormalizado: statusPagamento,
+        external_reference: paymentInfo.external_reference ?? null,
+        metadataParticipanteId: paymentInfo.metadata?.participanteId ?? null,
+        participanteIdResolvido: participanteId || null,
       });
-  
+
       if (!participanteId) {
+        console.warn('[MercadoPago][webhook] participanteId ausente após consultar MP', {
+          paymentId,
+        });
         return res.status(400).send('ParticipanteId ausente em external_reference/metadata');
       }
 
@@ -2220,24 +2353,32 @@ const atendimentoFraterno = async (req, res) => {
       });
 
       if (!participante) {
-        console.warn('Participante não encontrado para webhook:', participanteId);
+        console.warn('[MercadoPago][webhook] inscrição não encontrada', {
+          participanteId,
+          paymentId,
+        });
         return res.status(404).send('Participante não encontrado');
       }
 
-      if (participante.statusPagamento === 'pago' && statusPagamento === 'pago') {
-        console.log('Pagamento já estava marcado como pago. Nenhuma atualização necessária.', {
+      const statusAnterior = participante.statusPagamento ?? null;
+
+      if (statusAnterior === 'pago' && statusPagamento === 'pago') {
+        console.log('[MercadoPago][webhook] idempotente — já estava pago', {
           participanteId,
           paymentId,
+          statusAnterior,
         });
         return res.status(200).send('Pagamento já processado');
       }
 
-      if (mercadoPagoStatus === 'approved') {
-        console.log('[MercadoPago][webhook] pagamento aprovado recebido:', {
-          participanteId,
+      if (statusPagamento === 'N/A') {
+        console.warn('[MercadoPago][webhook] status MP sem mapeamento — inscrição não alterada', {
           paymentId,
-          external_reference: paymentInfo.external_reference,
+          participanteId,
+          statusMp: mercadoPagoStatus,
+          statusAnterior,
         });
+        return res.status(200).send('Status não mapeado');
       }
 
       const updatedParticipante = await prisma.participante2025.update({
@@ -2257,25 +2398,23 @@ const atendimentoFraterno = async (req, res) => {
         },
       });
 
-      console.log('Resultado da atualização do pagamento:', {
+      console.log('[MercadoPago][webhook] inscrição atualizada', {
         paymentId,
         participanteId,
-        statusMercadoPago: mercadoPagoStatus,
-        statusAtualizado: updatedParticipante.statusPagamento,
+        nomeCompleto: updatedParticipante.nomeCompleto,
+        statusAnterior,
+        statusMp: mercadoPagoStatus,
+        novoStatusSalvo: updatedParticipante.statusPagamento,
         dataPagamento: updatedParticipante.dataPagamento,
       });
 
-      if (updatedParticipante.statusPagamento === 'pago') {
-        console.log('[MercadoPago][webhook] status atualizado para pago com sucesso:', {
-          participanteId,
-          paymentId,
-          dataPagamento: updatedParticipante.dataPagamento,
-        });
-      }
-  
       return res.status(200).send('OK');
     } catch (err) {
-      console.error('Erro no webhook:', err);
+      console.error('[MercadoPago][webhook] erro', {
+        message: err?.message,
+        paymentId: paymentId || null,
+        stack: err?.stack,
+      });
       return res.status(500).send('Erro interno');
     }
   };

@@ -124,6 +124,8 @@ model Participante2025 {
   instituicaoId                Int?
   vegetariano                  String               @default("N/A")
   camisa                       Boolean?
+  camisaTipo                   String?
+  camisaCor                    String?
   primeiraComejaca             Boolean?             @default(false)
   deficienciaAuditiva          Boolean?
   deficienciaAutismo           Boolean?
@@ -181,6 +183,8 @@ model Participante2026 {
   instituicaoId                Int?
   vegetariano                  String               @default("N/A")
   camisa                       Boolean?
+  camisaTipo                   String?
+  camisaCor                    String?
   primeiraComejaca             Boolean?             @default(false)
   deficienciaAuditiva          Boolean?
   deficienciaAutismo           Boolean?

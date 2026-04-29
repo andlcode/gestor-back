@@ -142,7 +142,9 @@ router.get('/atendimentofraterno', verifyToken, isAdmin, atendimentoFraterno);
 /* =========================
    MERCADO PAGO
 ========================= */
+/** IPN antigo usa GET com `topic=payment&id=...`; Webhooks usam POST com JSON. */
 router.post('/mercadopago/notificacao', notificacao);
+router.get('/mercadopago/notificacao', notificacao);
 
 /* =========================
    ENVIO DE COMPROVANTE

@@ -100,6 +100,44 @@ const parseCamisaImagens = (value) => {
   return [];
 };
 
+/**
+ * Monta itens `{ url, legenda }` a partir de `camisaImagens` (TEXT[]).
+ * Cada entrada pode ser URL simples ou JSON: `{"url":"https://...","legenda":"..."}`.
+ */
+const buildCamisasImagensFromCamisaImagens = (camisaImagens) => {
+  const arr = Array.isArray(camisaImagens) ? camisaImagens : [];
+  const seen = new Set();
+  const out = [];
+
+  for (const raw of arr) {
+    const s = String(raw || '').trim();
+    if (!s) continue;
+
+    if (s.startsWith('{')) {
+      try {
+        const o = JSON.parse(s);
+        const url = String(o.url || o.href || '').trim();
+        if (!url || seen.has(url)) continue;
+        seen.add(url);
+        out.push({
+          url,
+          legenda: String(o.legenda || o.caption || '').trim(),
+        });
+        continue;
+      } catch {
+        // segue como URL literal
+      }
+    }
+
+    if (seen.has(s)) continue;
+    seen.add(s);
+    out.push({ url: s, legenda: '' });
+  }
+
+  return out;
+};
+
+/** Lista pública de URLs do modelo da camisa do evento ativo (galeria; ordem preservada). */
 const getEventoPublicCamisa = async (req, res) => {
   try {
     const eventoAtivo = await prisma.evento.findFirst({
@@ -108,14 +146,17 @@ const getEventoPublicCamisa = async (req, res) => {
       select: { camisaImagens: true },
     });
 
-    const camisaImagens = Array.isArray(eventoAtivo?.camisaImagens)
-      ? eventoAtivo.camisaImagens.map((u) => String(u || '').trim()).filter(Boolean)
-      : [];
+    const camisasImagens = buildCamisasImagensFromCamisaImagens(eventoAtivo?.camisaImagens);
+    const camisaImagens = camisasImagens.map((x) => x.url);
     const camisaImagemUrl = camisaImagens[0] || '';
 
     return res.status(200).json({
       success: true,
-      data: { camisaImagens, camisaImagemUrl },
+      data: {
+        camisasImagens,
+        camisaImagens,
+        camisaImagemUrl,
+      },
     });
   } catch (error) {
     console.error('[evento] erro ao buscar camisaImagens públicas:', {
