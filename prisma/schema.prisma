@@ -77,6 +77,8 @@ model Evento {
   valorTrabalhador         Float?
   valorConfraternista      Float?
   valorPequenoCompanheiro  Float?
+  valorCamisaAlgodao       Float?   @default(50)
+  valorCamisaPoliester     Float?   @default(35)
   camisaImagens            String[] @default([])
   ativo                    Boolean  @default(false)
   createdAt                DateTime @default(now())
@@ -136,7 +138,15 @@ model Participante2025 {
   deficienciaOutra             Boolean?
   deficienciaOutraDescricao    String?
   otherInstitution             String?
-  
+  valorInscricaoPagamento      Float?
+  valorCamisaPagamento         Float?
+  tipoCamisaPagamento          String?
+  corCamisaPagamento           String?
+  valorTotalPagamento          Float?
+  descricaoPagamento           String?
+  mercadoPagoPreferenceId    String?
+  mercadoPagoPaymentId       String?
+
   instituicao                  InstituicaoEspirita? @relation(fields: [instituicaoId], references: [id])
   user                         Users?               @relation(fields: [userId], references: [id])
 

@@ -13,6 +13,8 @@ const EMPTY_EVENT = {
   valorTrabalhador: '',
   valorConfraternista: '',
   valorPequenoCompanheiro: '',
+  valorCamisaAlgodao: '',
+  valorCamisaPoliester: '',
   camisaImagens: [],
   camisaImagemUrl: '',
   ativo: true,
@@ -46,6 +48,10 @@ const formatEvento = (evento) => {
       evento.valorPequenoCompanheiro != null
         ? String(evento.valorPequenoCompanheiro)
         : '',
+    valorCamisaAlgodao:
+      evento.valorCamisaAlgodao != null ? String(evento.valorCamisaAlgodao) : '',
+    valorCamisaPoliester:
+      evento.valorCamisaPoliester != null ? String(evento.valorCamisaPoliester) : '',
     camisaImagens,
     camisaImagemUrl: camisaImagens[0] || '',
     ativo: Boolean(evento.ativo),
@@ -67,6 +73,21 @@ const parseNumberField = (value) => {
 
   const normalized = Number(String(value).replace(',', '.'));
   return Number.isFinite(normalized) ? normalized : NaN;
+};
+
+const FALLBACK_CAMISA_ALGODAO = 50;
+const FALLBACK_CAMISA_POLIESTER = 35;
+
+/** Corpo vazio: mantém valor atual do evento; se não houver, usa fallback. */
+const resolveOptionalMoneyField = (rawBody, existingValue, fallback) => {
+  if (rawBody === '' || rawBody == null || rawBody === undefined) {
+    if (existingValue != null && Number.isFinite(Number(existingValue))) {
+      return Number(existingValue);
+    }
+    return fallback;
+  }
+  const n = Number(String(rawBody).replace(',', '.'));
+  return Number.isFinite(n) ? n : NaN;
 };
 
 const parseDateField = (value) => {
@@ -247,6 +268,37 @@ const updateEvento = async (req, res) => {
       });
     }
 
+    const eventoAtivoAtual = await prisma.evento.findFirst({
+      where: { ativo: true },
+      orderBy: { updatedAt: 'desc' },
+      select: { valorCamisaAlgodao: true, valorCamisaPoliester: true },
+    });
+
+    const valorCamisaAlgodao = resolveOptionalMoneyField(
+      req.body?.valorCamisaAlgodao,
+      eventoAtivoAtual?.valorCamisaAlgodao,
+      FALLBACK_CAMISA_ALGODAO
+    );
+    const valorCamisaPoliester = resolveOptionalMoneyField(
+      req.body?.valorCamisaPoliester,
+      eventoAtivoAtual?.valorCamisaPoliester,
+      FALLBACK_CAMISA_POLIESTER
+    );
+
+    if (Number.isNaN(valorCamisaAlgodao) || Number.isNaN(valorCamisaPoliester)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Os valores de camisa informados devem ser numéricos.',
+      });
+    }
+
+    if (valorCamisaAlgodao < 0 || valorCamisaPoliester < 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Os valores de camisa não podem ser negativos.',
+      });
+    }
+
     const payload = {
       nome,
       nomeExibicao: parseOptionalString(req.body?.nomeExibicao),
@@ -260,6 +312,8 @@ const updateEvento = async (req, res) => {
       valorTrabalhador,
       valorConfraternista,
       valorPequenoCompanheiro,
+      valorCamisaAlgodao,
+      valorCamisaPoliester,
       camisaImagens: parseCamisaImagens(req.body?.camisaImagens),
       ativo: true,
     };
