@@ -109,7 +109,7 @@ const normalizeComparableText = (value) =>
     .replace(/[\u0300-\u036f]/g, '');
 
 const FALLBACK_PRECO_CAMISA_ALGODAO = 50;
-const FALLBACK_PRECO_CAMISA_POLIESTER = 35;
+const FALLBACK_PRECO_CAMISA_POLIESTER = 30;
 
 const getPrecoCamisaAlgodaoEvento = (evento) => {
   const n = Number(evento?.valorCamisaAlgodao);
@@ -220,6 +220,12 @@ const formatMoneyBRL = (value) => {
   const n = Number(value);
   if (!Number.isFinite(n)) return String(value ?? '');
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n);
+};
+
+const roundMoney2 = (n) => {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return Number(x.toFixed(2));
 };
 
 /**
@@ -339,8 +345,13 @@ const joinMercadoPagoItemDescription = (lines) =>
 
 /** Rótulo do tipo de inscrição para o checkout (valores já vêm do Evento via valorInscricao). */
 const getTipoInscricaoLabelCheckout = (regra, tipoParticipacao) => {
-  if (regra === 'pequeno_companheiro') return 'Pequeno Companheiro';
+  if (regra === 'pequeno_companheiro' || regra === 'pequeno_companheiro_tipo') {
+    return 'Pequeno Companheiro';
+  }
   const tipo = String(tipoParticipacao || '').trim();
+  if (tipo === 'PequenoCompanheiro' || tipo === 'Pequeno Companheiro') {
+    return 'Pequeno Companheiro';
+  }
   if (tipo === 'Trabalhador') return 'Trabalhador';
   if (tipo === 'Confraternista') return 'Confraternista';
   return tipo || 'Participante';
@@ -369,9 +380,9 @@ const buildResumoPagamentoForFrontend = ({
   const r = resolverCamisaPagamento(participante);
   const valorCamisaNum = Number(valorCamisa || 0);
   const camisa =
-    valorCamisaNum > 0 && r.tipoLabel
+    valorCamisaNum > 0
       ? {
-          tipo: r.tipoLabel,
+          tipo: r.tipoLabel || 'Camisa',
           cor: r.corLabel || null,
           tamanho: r.tamanho,
           valor: Number(Number(valorCamisaNum).toFixed(2)),
@@ -1187,27 +1198,33 @@ const participante = async (req, res) => {
         : null;
     }
 
-    // O link de pagamento e gerado apenas sob demanda no botao "Pagar".
-    const eventoAtivo = await loadEventoAtivoParaValor(prisma);
-    const valorInscricao = getValorInscricao({
-      inscricao: {
-        dataNascimento: dadosParticipante.dataNascimento,
-        tipoParticipacao: dadosParticipante.tipoParticipacao,
-      },
-      evento: eventoAtivo,
-    });
-    dadosParticipante.valor = valorInscricao.valor;
+    const CAMPOS_PAGAMENTO_PROIBIDOS_CREATE = [
+      'linkPagamento',
+      'mercadoPagoPreferenceId',
+      'mercadoPagoPaymentId',
+      'valorInscricaoPagamento',
+      'valorCamisaPagamento',
+      'valorTotalPagamento',
+      'descricaoPagamento',
+      'tipoCamisaPagamento',
+      'corCamisaPagamento',
+      'dataPagamento',
+      'valor',
+      'statusPagamento',
+    ];
+    for (const key of CAMPOS_PAGAMENTO_PROIBIDOS_CREATE) {
+      delete dadosParticipante[key];
+    }
+
+    // Pagamento (valor, link, snapshots MP) só após o usuário usar o botão "Pagar".
+    dadosParticipante.valor = null;
     dadosParticipante.linkPagamento = null;
-    console.log('[MercadoPago][participante] valor inscrição (evento)', {
-      participanteId,
-      eventoId: eventoAtivo?.id ?? null,
-      dataNascimento: dadosParticipante.dataNascimento,
-      tipoParticipacao: dadosParticipante.tipoParticipacao,
-      idadeNaDataEvento: valorInscricao.idadeNaDataEvento,
-      regra: valorInscricao.regra,
-      valor: valorInscricao.valor,
-    });
     dadosParticipante.statusPagamento = 'pendente';
+
+    console.log('[MercadoPago][participante] inscrição criada sem cálculo de pagamento nem dados MP:', {
+      participanteId,
+      tipoParticipacao: dadosParticipante.tipoParticipacao,
+    });
 
     // Salvar participante no banco
     const novoParticipante = await prisma.participante2025.create({
@@ -1315,6 +1332,9 @@ const gerarNovoLinkPagamento = async (id) => {
         camisaCor: true,
         tamanhoCamisa: true,
         IE: true,
+        valorInscricaoPagamento: true,
+        valorCamisaPagamento: true,
+        valorTotalPagamento: true,
       },
     });
 
@@ -1350,22 +1370,51 @@ const gerarNovoLinkPagamento = async (id) => {
       };
     }
 
-    console.log('[Pagamento] dados camisa inscrição:', {
-      camisa: participante.camisa,
-      querCamisa: participante.querCamisa,
-      temCamisa: participante.temCamisa,
-      camisaTipo: participante.camisaTipo,
-      tipoCamisa: participante.tipoCamisa,
-      camisaMaterial: participante.camisaMaterial,
-      camisaCor: participante.camisaCor,
-      tamanhoCamisa: participante.tamanhoCamisa,
-    });
-
     const eventoAtivo = await loadEventoAtivoParaValor(prisma);
     const { valorInscricao, valorCamisa, total, regra } = calcularTotalPagamento({
       inscricao: participante,
       evento: eventoAtivo,
     });
+
+    const vi = roundMoney2(valorInscricao);
+    const vc = roundMoney2(valorCamisa);
+    const vt = roundMoney2(total);
+    const linkAnterior = String(participante.linkPagamento || '').trim();
+
+    const snapshotCompativel =
+      linkAnterior &&
+      participante.valorInscricaoPagamento != null &&
+      participante.valorCamisaPagamento != null &&
+      participante.valorTotalPagamento != null &&
+      roundMoney2(participante.valorInscricaoPagamento) === vi &&
+      roundMoney2(participante.valorCamisaPagamento) === vc &&
+      roundMoney2(participante.valorTotalPagamento) === vt;
+
+    if (snapshotCompativel) {
+      const resumoReuse = buildResumoPagamentoForFrontend({
+        participante,
+        valorInscricao,
+        valorCamisa,
+        total,
+        regra,
+      });
+      console.log('[Pagamento] valores calculados', {
+        participanteId: participante.id,
+        tipoParticipacao,
+        valorInscricao: vi,
+        valorCamisa: vc,
+        valorTotalPagamento: vt,
+        linkAnterior,
+        novoLinkGerado: false,
+      });
+      return {
+        success: true,
+        linkPagamento: linkAnterior,
+        participante,
+        resumo: resumoReuse,
+      };
+    }
+
     const items = buildMercadoPagoItems({
       inscricao: participante,
       valorInscricao,
@@ -1430,16 +1479,34 @@ const gerarNovoLinkPagamento = async (id) => {
       hasSandboxInitPoint: Boolean(mpResponse?.sandbox_init_point),
     });
 
-    if (!mpResponse || !mpResponse.init_point) {
+    const novoCheckoutUrl = String(
+      mpResponse.init_point || mpResponse.sandbox_init_point || ''
+    ).trim();
+    if (!novoCheckoutUrl) {
       throw new Error('Falha ao gerar o link de pagamento.');
     }
+
+    console.log('[Pagamento] valores calculados', {
+      participanteId: participante.id,
+      tipoParticipacao,
+      valorInscricao: vi,
+      valorCamisa: vc,
+      valorTotalPagamento: vt,
+      linkAnterior: linkAnterior || null,
+      novoLinkGerado: true,
+    });
 
     const participanteAtualizado = await prisma.participante2025.update({
       where: { id: participante.id },
       data: {
-        linkPagamento: mpResponse.init_point,
+        linkPagamento: novoCheckoutUrl,
         statusPagamento: 'pendente',
-        valor: total,
+        valor: vt,
+        valorInscricaoPagamento: vi,
+        valorCamisaPagamento: vc,
+        valorTotalPagamento: vt,
+        mercadoPagoPreferenceId:
+          mpResponse.id != null ? String(mpResponse.id) : null,
       },
     });
 
@@ -1459,9 +1526,13 @@ const gerarNovoLinkPagamento = async (id) => {
       regra,
     });
 
+    if (!resumo || typeof resumo !== 'object') {
+      throw new Error('Falha ao montar resumo do pagamento.');
+    }
+
     return {
       success: true,
-      linkPagamento: mpResponse.init_point,
+      linkPagamento: novoCheckoutUrl,
       participante: participanteAtualizado,
       resumo,
     };
@@ -1609,49 +1680,22 @@ const updateInscricao = async (req, res) => {
       }
     }
 
-    const ts = (d) => (d == null ? null : new Date(d).getTime());
-    const birthChanged =
-      prismaUpdateData.dataNascimento !== undefined &&
-      ts(participanteExistente.dataNascimento) !== ts(prismaUpdateData.dataNascimento);
-    const tipoChanged =
-      prismaUpdateData.tipoParticipacao !== undefined &&
-      String(participanteExistente.tipoParticipacao || '') !==
-        String(prismaUpdateData.tipoParticipacao || '');
-
-    if (
-      (birthChanged || tipoChanged) &&
-      participanteExistente.statusPagamento !== 'pago'
-    ) {
-      const nextBirth =
-        prismaUpdateData.dataNascimento !== undefined
-          ? new Date(prismaUpdateData.dataNascimento)
-          : participanteExistente.dataNascimento;
-      const nextTipo =
-        prismaUpdateData.tipoParticipacao !== undefined
-          ? prismaUpdateData.tipoParticipacao
-          : participanteExistente.tipoParticipacao;
-
-      prismaUpdateData.linkPagamento = null;
-      const eventoAtivo = await loadEventoAtivoParaValor(prisma);
-      const recalculo = getValorInscricao({
-        inscricao: {
-          dataNascimento: nextBirth,
-          tipoParticipacao: nextTipo,
-        },
-        evento: eventoAtivo,
-      });
-      prismaUpdateData.valor = recalculo.valor;
-
-      console.log('[MercadoPago][updateInscricao] link limpo (data nascimento ou tipo alterado)', {
-        id,
-        birthChanged,
-        tipoChanged,
-        statusPagamento: participanteExistente.statusPagamento,
-        idadeNaDataEvento: recalculo.idadeNaDataEvento,
-        regra: recalculo.regra,
-        novoValor: recalculo.valor,
-        eventoId: eventoAtivo?.id ?? null,
-      });
+    const CAMPOS_PAGAMENTO_PROIBIDOS_UPDATE = [
+      'linkPagamento',
+      'mercadoPagoPreferenceId',
+      'mercadoPagoPaymentId',
+      'valorInscricaoPagamento',
+      'valorCamisaPagamento',
+      'valorTotalPagamento',
+      'descricaoPagamento',
+      'tipoCamisaPagamento',
+      'corCamisaPagamento',
+      'dataPagamento',
+      'valor',
+      'statusPagamento',
+    ];
+    for (const key of CAMPOS_PAGAMENTO_PROIBIDOS_UPDATE) {
+      delete prismaUpdateData[key];
     }
 
     console.log('[nomeCracha][back] objeto enviado ao Prisma (data)', {
@@ -2325,14 +2369,26 @@ const resetPassword = async (req, res) => {
         });
       }
 
+      const urlCheckout = String(resultado.linkPagamento || '').trim();
+      if (!urlCheckout || !resultado.resumo || typeof resultado.resumo !== 'object') {
+        console.error('[Pagamento][paymentId] sucesso sem link ou resumo válidos', {
+          id,
+          temLink: Boolean(urlCheckout),
+          temResumo: Boolean(resultado.resumo),
+        });
+        return res.status(500).json({
+          error: 'Link de pagamento indisponível. Tente novamente.',
+        });
+      }
+
       console.log('[MercadoPago][paymentId] novo link gerado ao frontend:', {
         id,
         statusPagamento: resultado.participante?.statusPagamento || 'pendente',
-        linkPagamento: resultado.linkPagamento,
+        linkPagamento: urlCheckout,
       });
 
       return res.status(200).json({
-        init_point: resultado.linkPagamento,
+        init_point: urlCheckout,
         resumo: resultado.resumo,
       });
     } catch (error) {

@@ -64,6 +64,14 @@ const getValorInscricao = ({ inscricao, evento }) => {
   }
 
   const tipo = String(inscricao.tipoParticipacao || '').trim();
+  if (tipo === 'PequenoCompanheiro' || tipo === 'Pequeno Companheiro') {
+    return {
+      valor: safeFloat(evento.valorPequenoCompanheiro),
+      regra: 'pequeno_companheiro_tipo',
+      idadeNaDataEvento,
+    };
+  }
+
   if (tipo === 'Trabalhador') {
     return {
       valor: safeFloat(evento.valorTrabalhador),
