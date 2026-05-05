@@ -6,8 +6,8 @@
 */
 -- AlterTable
 ALTER TABLE "Participantes2025" DROP COLUMN "ativo",
-ADD COLUMN     "statusAutorizacao" TEXT DEFAULT 'pendente';
+ADD COLUMN   IF NOT EXISTS "statusAutorizacao" TEXT DEFAULT 'pendente';
 
 -- AlterTable
 ALTER TABLE "Participantes2026" ADD COLUMN     "camisaCor" TEXT,
-ADD COLUMN     "camisaTipo" TEXT;
+ADD COLUMN  IF NOT EXISTS "camisaTipo" TEXT;

@@ -22,21 +22,20 @@ model Users {
   comunicacaocomejaca        String?
   comunicacaomovimento       String?
   telefone                   String?
+  resetTokenVersion          Int                   @default(0)
   instituicoesAtualizadas    InstituicaoEspirita[] @relation("InstituicaoAtualizadaPor")
   instituicoesCriadas        InstituicaoEspirita[] @relation("InstituicaoCriadaPor")
   Participante2025           Participante2025[]
-
   Participante2026           Participante2026[]
-  instituicoes               InstituicaoEspirita[] @relation("InstituicaoEspiritaToUsers")
   passwordResetTokens        PasswordResetToken[]
- resetTokenVersion  Int      @default(0)
+  instituicoes               InstituicaoEspirita[] @relation("InstituicaoEspiritaToUsers")
+
   @@map("Users")
 }
 
 model InstituicaoEspirita {
   id               Int                @id @default(autoincrement())
   nome             String
-  nome_CNPJ        String?
   estado           String?
   cidade           String?
   bairro           String?
@@ -54,59 +53,50 @@ model InstituicaoEspirita {
   horario          String?
   atualizadoPorId  Int?
   CNPJ             String             @unique
+  nome_CNPJ        String?
   atualizadoPor    Users?             @relation("InstituicaoAtualizadaPor", fields: [atualizadoPorId], references: [id])
   criadoPor        Users?             @relation("InstituicaoCriadaPor", fields: [criadoPorId], references: [id])
   Participante2025 Participante2025[]
-    Participante2026 Participante2026[]
+  Participante2026 Participante2026[]
   Users            Users[]            @relation("InstituicaoEspiritaToUsers")
 
   @@map("InstituicaoEspirita")
 }
 
 model Evento {
-  id                       Int      @id @default(autoincrement())
-  nome                     String
-  nomeExibicao             String?
-  nomeCompleto             String?
-  tema                     String?
-  ano                      Int
-  dataInicio               DateTime
-  dataFim                  DateTime?
-  localNome                String
-  localEndereco            String?
-  valorTrabalhador         Float?
-  valorConfraternista      Float?
-  valorPequenoCompanheiro  Float?
-  valorCamisaAlgodao       Float?   @default(50)
-  valorCamisaPoliester     Float?   @default(35)
-  camisaImagens            String[] @default([])
-  ativo                    Boolean  @default(false)
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+  id                      Int       @id @default(autoincrement())
+  nome                    String
+  nomeExibicao            String?
+  nomeCompleto            String?
+  ano                     Int
+  dataInicio              DateTime
+  dataFim                 DateTime?
+  localNome               String
+  localEndereco           String?
+  valorTrabalhador        Float?
+  valorConfraternista     Float?
+  valorPequenoCompanheiro Float?
+  ativo                   Boolean   @default(false)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  tema                    String?
+  camisaImagens           String[]  @default([])
+  valorCamisaAlgodao      Int?      @default(0)
+  valorCamisaPoliester    Int?      @default(0)
 
   @@map("Evento")
 }
+
 model Participante2025 {
   id                           String               @id @default(uuid())
   nomeCompleto                 String
-  nomeCracha                   String?
-  cpf                          String?
-  nomeSocial                   String?
   dataNascimento               DateTime
-  statusAutorizacao            String? @default("pendente")
-  sexo                         String
   email                        String
   telefone                     String
   nomeCompletoResponsavel      String?
   documentoResponsavel         String?
   telefoneResponsavel          String?
-  linkPagamento                String?
-  idade                        Int?
-  valor                        Float?
-  statusPagamento              String?
-  dataPagamento                DateTime?
   tipoParticipacao             TipoParticipacao
-  comissao                     String?
   tamanhoCamisa                String?
   cep                          String
   estado                       String?
@@ -115,7 +105,6 @@ model Participante2025 {
   logradouro                   String?
   numero                       String?
   complemento                  String?
-  outroGenero                  String?
   medicacao                    String?
   alergia                      String?
   outrasInformacoes            String?
@@ -124,29 +113,41 @@ model Participante2025 {
   updatedAt                    DateTime             @updatedAt
   IE                           String
   instituicaoId                Int?
+  nomeSocial                   String?
   vegetariano                  String               @default("N/A")
   camisa                       Boolean?
-  camisaTipo                   String?
-  camisaCor                    String?
-  primeiraComejaca             Boolean?             @default(false)
   deficienciaAuditiva          Boolean?
   deficienciaAutismo           Boolean?
-  deficienciaIntelectual       Boolean?
-  deficienciaParalisiaCerebral Boolean?
-  deficienciaVisual            Boolean?
   deficienciaFisica            Boolean?
+  deficienciaIntelectual       Boolean?
   deficienciaOutra             Boolean?
   deficienciaOutraDescricao    String?
+  deficienciaParalisiaCerebral Boolean?
+  deficienciaVisual            Boolean?
+  primeiraComejaca             Boolean?             @default(false)
+  sexo                         String
+  comissao                     String?
+  outroGenero                  String?
+  linkPagamento                String?
+  idade                        Int?
+  statusPagamento              String?
+  valor                        Float?
+  cpf                          String?
   otherInstitution             String?
-  valorInscricaoPagamento      Float?
-  valorCamisaPagamento         Float?
+  nomeCracha                   String?
+  dataPagamento                DateTime?
+  statusAutorizacao            String?              @default("pendente")
+  ativo                        Boolean              @default(true)
+  camisaTipo                   String?
+  camisaCor                    String?
+  valorInscricaoPagamento      Int?                 @default(0)
+  valorCamisaPagamento         Int?                 @default(0)
+  valorTotalPagamento          Int?                 @default(0)
   tipoCamisaPagamento          String?
   corCamisaPagamento           String?
-  valorTotalPagamento          Float?
+  mercadoPagoPreferenceId      String?
+  mercadoPagoPaymentId         String?
   descricaoPagamento           String?
-  mercadoPagoPreferenceId    String?
-  mercadoPagoPaymentId       String?
-
   instituicao                  InstituicaoEspirita? @relation(fields: [instituicaoId], references: [id])
   user                         Users?               @relation(fields: [userId], references: [id])
 
@@ -155,7 +156,6 @@ model Participante2025 {
 
 model Participante2026 {
   id                           String               @id @default(uuid())
-  ativo Boolean                @default(true)
   nomeCompleto                 String
   nomeCracha                   String?
   cpf                          String?
@@ -171,7 +171,6 @@ model Participante2026 {
   idade                        Int?
   valor                        Float?
   statusPagamento              String?
-  dataPagamento                DateTime?
   tipoParticipacao             TipoParticipacao
   comissao                     String?
   tamanhoCamisa                String?
@@ -193,8 +192,6 @@ model Participante2026 {
   instituicaoId                Int?
   vegetariano                  String               @default("N/A")
   camisa                       Boolean?
-  camisaTipo                   String?
-  camisaCor                    String?
   primeiraComejaca             Boolean?             @default(false)
   deficienciaAuditiva          Boolean?
   deficienciaAutismo           Boolean?
@@ -205,11 +202,25 @@ model Participante2026 {
   deficienciaOutra             Boolean?
   deficienciaOutraDescricao    String?
   otherInstitution             String?
-  
+  dataPagamento                DateTime?
+  ativo                        Boolean              @default(true)
+  camisaTipo                   String?
+  camisaCor                    String?
   instituicao                  InstituicaoEspirita? @relation(fields: [instituicaoId], references: [id])
   user                         Users?               @relation(fields: [userId], references: [id])
 
   @@map("Participantes2026")
+}
+
+model PasswordResetToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  userId    Int
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      Users    @relation(fields: [userId], references: [id])
+
+  @@map("PasswordResetToken")
 }
 
 enum Role {
@@ -221,23 +232,13 @@ enum Role {
 enum Sexo {
   Masculino_CIS   @map("Masculino CIS")
   Feminino_CIS    @map("Feminino CIS")
-  Masculino_Trans @map("Masculino Trans")
   Feminino_Trans  @map("Feminino Trans")
   Nao_binario     @map("Não Binário")
+  Masculino_Trans @map("Masculino Trans")
 }
 
 enum TipoParticipacao {
   Confraternista
   Trabalhador
-}
-
-model PasswordResetToken {
-  id        Int      @id @default(autoincrement())
-  token     String   @unique
-  userId    Int
-  user      Users    @relation(fields: [userId], references: [id])
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-
-  @@map("PasswordResetToken")
+  Pequeno_Companheiro @map("Pequeno Companheiro")
 }
