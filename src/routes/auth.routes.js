@@ -32,6 +32,8 @@ const {
   enviarEmailComArquivo,
   enviarEmailRedefinicao,
   atendimentoFraterno,
+  exportInscricoesAno,
+  exportInscricoesAnoFull,
 } = require('../controllers/auth.controller.js');
 
 const upload = require('../config/upload');
@@ -91,6 +93,8 @@ router.get('/print/:participanteId', isAuthenticated, obterInscricao);
 router.get('/pagamento/:id', isAuthenticated, paymentId);
 router.get('/pagamentos', isAuthenticated, listarParticipantes);
 router.put('/pagamentos/:id/status', isAuthenticated, isAdminTotal, AtualizarpaymentId);
+router.get('/inscricoes/export', isAuthenticated, isAdmin, exportInscricoesAno);
+router.get('/inscricoes/export/full', isAuthenticated, isAdmin, exportInscricoesAnoFull);
 
 router.put('/atualizarPerfil', isAuthenticated, atualizarPerfil);
 router.put('/participante/:id', isAuthenticated, updateInscricao);

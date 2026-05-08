@@ -68,6 +68,16 @@ const createdAtLocalCalendarYearWhere = (ano) => ({
 });
 
 /**
+ * Produção pode estar com schema Prisma adiantado em relação ao banco (ex.: coluna `ativo` em
+ * migration local `20260421180000_add_participante_ativo` ainda não aplicada). Não envie esse
+ * campo em create/update para evitar erro SQL; não altera regra de negócio.
+ */
+const stripParticipante2025CampoAtivoSeAusenteNoBanco = (obj) => {
+  if (!obj || typeof obj !== 'object') return;
+  delete obj.ativo;
+};
+
+/**
  * Normaliza status oficial do pagamento (consultado na API do Mercado Pago)
  * para o valor persistido em `Participantes2025.statusPagamento`.
  */
@@ -1216,6 +1226,8 @@ const participante = async (req, res) => {
       delete dadosParticipante[key];
     }
 
+    stripParticipante2025CampoAtivoSeAusenteNoBanco(dadosParticipante);
+
     // Pagamento (valor, link, snapshots MP) só após o usuário usar o botão "Pagar".
     dadosParticipante.valor = null;
     dadosParticipante.linkPagamento = null;
@@ -1508,6 +1520,16 @@ const gerarNovoLinkPagamento = async (id) => {
         mercadoPagoPreferenceId:
           mpResponse.id != null ? String(mpResponse.id) : null,
       },
+      select: {
+        id: true,
+        linkPagamento: true,
+        statusPagamento: true,
+        valor: true,
+        valorInscricaoPagamento: true,
+        valorCamisaPagamento: true,
+        valorTotalPagamento: true,
+        mercadoPagoPreferenceId: true,
+      },
     });
 
     console.log('[MercadoPago][gerarNovoLinkPagamento] link salvo no banco:', {
@@ -1697,6 +1719,8 @@ const updateInscricao = async (req, res) => {
     for (const key of CAMPOS_PAGAMENTO_PROIBIDOS_UPDATE) {
       delete prismaUpdateData[key];
     }
+
+    stripParticipante2025CampoAtivoSeAusenteNoBanco(prismaUpdateData);
 
     console.log('[nomeCracha][back] objeto enviado ao Prisma (data)', {
       nomeCracha: prismaUpdateData.nomeCracha,
@@ -2422,6 +2446,7 @@ const resetPassword = async (req, res) => {
       // Verifique se o participante existe
       const participante = await prisma.participante2025.findUnique({
         where: { id },
+        select: { id: true, dataPagamento: true },
       });
   
       if (!participante) {
@@ -2437,6 +2462,11 @@ const resetPassword = async (req, res) => {
             statusPagamento === 'pago'
               ? participante.dataPagamento || new Date()
               : participante.dataPagamento,
+        },
+        select: {
+          id: true,
+          statusPagamento: true,
+          dataPagamento: true,
         },
       });
   
@@ -2663,6 +2693,327 @@ const resetPassword = async (req, res) => {
       });
     }
   };
+
+const escapeCsvValue = (value) => {
+  if (value === null || value === undefined) return '';
+  const s = String(value);
+  if (/[",\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+};
+
+const normalizeScalarForCsv = (value) => {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value);
+};
+
+/**
+ * Achata objeto (1-N níveis) para CSV.
+ * - objetos viram chaves `prefixo.campo`
+ * - arrays/objetos complexos viram JSON stringificado
+ */
+const flattenForCsv = (obj, prefix = '', out = {}) => {
+  if (!obj || typeof obj !== 'object') return out;
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (v === null || v === undefined) {
+      out[key] = '';
+      continue;
+    }
+    if (v instanceof Date) {
+      out[key] = v.toISOString();
+      continue;
+    }
+    if (Array.isArray(v)) {
+      out[key] = JSON.stringify(v);
+      continue;
+    }
+    if (typeof v === 'object') {
+      // Evita explodir profundidade: se for objeto “grande”, ainda achatamos 1 nível.
+      flattenForCsv(v, key, out);
+      continue;
+    }
+    out[key] = normalizeScalarForCsv(v);
+  }
+  return out;
+};
+
+/**
+ * Exporta todos os inscritos do ano (ano civil de createdAt) em CSV.
+ * Rota sugerida: GET /api/auth/inscricoes/export?ano=2026
+ * - Não altera regras de pagamento nem integrações; apenas leitura.
+ */
+const exportInscricoesAno = async (req, res) => {
+  try {
+    const ano = parseAnoInscricaoQuery(req.query.ano);
+    if (ano == null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Ano inválido.',
+      });
+    }
+
+    const where = createdAtLocalCalendarYearWhere(ano);
+
+    const [participantes, eventoAtivo] = await Promise.all([
+      prisma.participante2025.findMany({
+        where,
+        orderBy: { nomeCompleto: 'asc' },
+        select: {
+          id: true,
+          nomeCompleto: true,
+          email: true,
+          telefone: true,
+          IE: true,
+          tipoParticipacao: true,
+          camisa: true,
+          camisaTipo: true,
+          tamanhoCamisa: true,
+          valorInscricaoPagamento: true,
+          valorCamisaPagamento: true,
+          valorTotalPagamento: true,
+          tipoCamisaPagamento: true,
+          corCamisaPagamento: true,
+          statusPagamento: true,
+          mercadoPagoPaymentId: true,
+          mercadoPagoPreferenceId: true,
+          comissao: true,
+          createdAt: true,
+        },
+      }),
+      loadEventoAtivoParaValor(prisma),
+    ]);
+
+    if (!Array.isArray(participantes) || participantes.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Nenhum registro encontrado para o ano selecionado.',
+      });
+    }
+
+    const header = [
+      'nome',
+      'email',
+      'telefone',
+      'casaEspiritaIe',
+      'tipoParticipacao',
+      'valorInscricao',
+      'camisa',
+      'tipoCamisa',
+      'tamanhoCamisa',
+      'valorCamisa',
+      'total',
+      'statusPagamento',
+      'idMercadoPago',
+      'comissao',
+      'dataInscricao',
+      'ano',
+    ];
+
+    const lines = [];
+    lines.push(header.join(','));
+
+    for (const p of participantes) {
+      const valores = getValoresPagamentoListagem(p, eventoAtivo);
+      const idMercadoPago =
+        (p?.mercadoPagoPaymentId != null && String(p.mercadoPagoPaymentId).trim()) ||
+        (p?.mercadoPagoPreferenceId != null && String(p.mercadoPagoPreferenceId).trim()) ||
+        '';
+
+      const row = [
+        p?.nomeCompleto ?? '',
+        p?.email ?? '',
+        p?.telefone ?? '',
+        p?.IE ?? '',
+        p?.tipoParticipacao ?? '',
+        valores?.listagemValorInscricao ?? '',
+        p?.camisa === true ? 'sim' : p?.camisa === false ? 'não' : '',
+        p?.tipoCamisaPagamento ?? p?.camisaTipo ?? '',
+        p?.tamanhoCamisa ?? '',
+        valores?.listagemValorCamisa ?? '',
+        valores?.listagemValorTotal ?? '',
+        p?.statusPagamento ?? '',
+        idMercadoPago,
+        p?.comissao ?? '',
+        p?.createdAt instanceof Date ? p.createdAt.toISOString() : '',
+        ano,
+      ].map(escapeCsvValue);
+
+      lines.push(row.join(','));
+    }
+
+    const filename = `inscritos-${ano}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    // BOM para Excel
+    return res.status(200).send(`\uFEFF${lines.join('\r\n')}`);
+  } catch (error) {
+    console.error('Erro ao exportar inscritos:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Erro ao exportar os registros.',
+    });
+  }
+};
+
+/**
+ * Exportação completa: retorna TODOS os campos disponíveis no model + relações.
+ * GET /api/auth/inscricoes/export/full?ano=2026
+ */
+const exportInscricoesAnoFull = async (req, res) => {
+  try {
+    const ano = parseAnoInscricaoQuery(req.query.ano);
+    if (ano == null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Ano inválido.',
+      });
+    }
+
+    const where = createdAtLocalCalendarYearWhere(ano);
+
+    // IMPORTANTE: select explícito apenas de colunas que já são usadas no sistema.
+    // Evita divergência schema vs banco (ex.: coluna `ativo` ausente em produção).
+    const registros = await prisma.participante2025.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+      select: {
+        // Identificação / contato
+        id: true,
+        nomeCompleto: true,
+        nomeCracha: true,
+        nomeSocial: true,
+        email: true,
+        telefone: true,
+        cpf: true,
+
+        // Inscrição
+        createdAt: true,
+        updatedAt: true,
+        dataNascimento: true,
+        sexo: true,
+        tipoParticipacao: true,
+        IE: true,
+        comissao: true,
+        primeiraComejaca: true,
+
+        // Endereço
+        cep: true,
+        estado: true,
+        cidade: true,
+        bairro: true,
+        logradouro: true,
+        numero: true,
+        complemento: true,
+        otherInstitution: true,
+
+        // Responsável (quando menor)
+        nomeCompletoResponsavel: true,
+        documentoResponsavel: true,
+        telefoneResponsavel: true,
+
+        // Saúde / observações (campos usados em modal/detalhes)
+        medicacao: true,
+        alergia: true,
+        outrasInformacoes: true,
+        vegetariano: true,
+        deficienciaAuditiva: true,
+        deficienciaAutismo: true,
+        deficienciaIntelectual: true,
+        deficienciaParalisiaCerebral: true,
+        deficienciaVisual: true,
+        deficienciaFisica: true,
+        deficienciaOutra: true,
+        deficienciaOutraDescricao: true,
+        outroGenero: true,
+
+        // Camisa / pagamento (colunas já referenciadas no código)
+        camisa: true,
+        camisaTipo: true,
+        camisaCor: true,
+        tamanhoCamisa: true,
+        linkPagamento: true,
+        statusPagamento: true,
+        dataPagamento: true,
+        valor: true,
+        valorInscricaoPagamento: true,
+        valorCamisaPagamento: true,
+        valorTotalPagamento: true,
+        tipoCamisaPagamento: true,
+        corCamisaPagamento: true,
+        mercadoPagoPreferenceId: true,
+        mercadoPagoPaymentId: true,
+        descricaoPagamento: true,
+
+        // Relações: selecionar explicitamente para evitar tentar ler colunas não existentes nas tabelas relacionadas.
+        instituicaoId: true,
+        instituicao: {
+          select: {
+            id: true,
+            nome: true,
+            sigla: true,
+            CNPJ: true,
+            cidade: true,
+            estado: true,
+            email: true,
+            telefone: true,
+          },
+        },
+        userId: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            telefone: true,
+          },
+        },
+      },
+    });
+
+    if (!Array.isArray(registros) || registros.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Nenhum registro encontrado para o ano selecionado.',
+      });
+    }
+
+    const flattened = registros.map((r) => ({
+      ...flattenForCsv(r),
+      ano: String(ano),
+    }));
+    const columns = Array.from(
+      flattened.reduce((set, row) => {
+        Object.keys(row).forEach((k) => set.add(k));
+        return set;
+      }, new Set())
+    ).sort((a, b) => a.localeCompare(b));
+
+    const lines = [];
+    lines.push(columns.map(escapeCsvValue).join(','));
+    for (const row of flattened) {
+      lines.push(columns.map((c) => escapeCsvValue(row[c] ?? '')).join(','));
+    }
+
+    const filename = `registros-completos-${ano}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=\"${filename}\"`);
+    return res.status(200).send(`\uFEFF${lines.join('\r\n')}`);
+  } catch (error) {
+    console.error('Erro ao exportar registros completos:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Erro ao exportar os registros.',
+    });
+  }
+};
 
 const atendimentoFraterno = async (req, res) => {
   try {
@@ -2943,4 +3294,4 @@ const enviarEmailComArquivo = async (nomeCompleto, email, arquivo) => {
 
   
 
-  module.exports = { changePassword,esquecisenha, obterInscricao, getProfile, updateProfile, atualizarInstituicao, listarInstituicoes, criarInstituicao, getparticipantes, participante,resendVerificationCode, login, register, validateToken,verificar, paymentId,resetPassword, forgotPassword,listarParticipantes, notificacao, AtualizarpaymentId, atualizarPerfil, atendimentoFraterno, updateInscricao, gerarNovoLinkPagamento, enviarEmailComArquivo, enviarEmailRedefinicao, validateResetPasswordToken}
+  module.exports = { changePassword,esquecisenha, obterInscricao, getProfile, updateProfile, atualizarInstituicao, listarInstituicoes, criarInstituicao, getparticipantes, participante,resendVerificationCode, login, register, validateToken,verificar, paymentId,resetPassword, forgotPassword,listarParticipantes, exportInscricoesAno, exportInscricoesAnoFull, notificacao, AtualizarpaymentId, atualizarPerfil, atendimentoFraterno, updateInscricao, gerarNovoLinkPagamento, enviarEmailComArquivo, enviarEmailRedefinicao, validateResetPasswordToken}
