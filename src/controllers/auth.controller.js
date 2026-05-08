@@ -32,6 +32,8 @@ const isAuthFlowDebug = () => process.env.AUTH_FLOW_DEBUG === '1';
 
 dotenv.config();
 const BASE_URL = process.env.BASE_URL;
+const DEFAULT_FRONTEND_URL_PROD = 'https://www.comejaca.org.br';
+const DEFAULT_FRONTEND_URL_DEV = 'http://localhost:3000';
 const FRONTEND_URL =
   process.env.FRONTEND_URL ||
   process.env.VERCEL_FRONTEND_URL ||
@@ -39,7 +41,7 @@ const FRONTEND_URL =
   (process.env.VERCEL_URL
     ? `https://${String(process.env.VERCEL_URL).replace(/^https?:\/\//, '')}`
     : '') ||
-  'http://localhost:3000';
+  (process.env.NODE_ENV === 'production' ? DEFAULT_FRONTEND_URL_PROD : DEFAULT_FRONTEND_URL_DEV);
 
 const getFrontendBaseUrl = () => {
   return FRONTEND_URL.replace(/\/+$/, '');
@@ -474,7 +476,18 @@ const buildMercadoPagoPreferenceData = ({ participante, items, notificationUrl }
     String(FRONTEND_URL).includes('localhost') ||
     String(FRONTEND_URL).includes('127.0.0.1');
 
-  const baseUrl = getFrontendBaseUrl();
+  const baseUrl = (() => {
+    const url = getFrontendBaseUrl();
+    // Em produção, back_urls com localhost tendem a quebrar o checkout/retorno do Mercado Pago.
+    if (isProduction && isLocalhostFrontend) {
+      console.warn('[MercadoPago] FRONTEND_URL parece localhost em produção; usando fallback seguro.', {
+        FRONTEND_URL,
+        fallback: DEFAULT_FRONTEND_URL_PROD,
+      });
+      return DEFAULT_FRONTEND_URL_PROD;
+    }
+    return url;
+  })();
 
   const safeItems = Array.isArray(items) ? items.filter(Boolean) : [];
   if (safeItems.length === 0) {
