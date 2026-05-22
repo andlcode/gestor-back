@@ -26,6 +26,8 @@ const {
 const {
   isCamisaTipoValid,
   isCamisaCorValid,
+  validateAndNormalizeIdadeCamisaInfantil,
+  stripIdadeCamisaInfantilSeAusenteNoBanco,
 } = require('../constants/camisaParticipante');
 
 const isAuthFlowDebug = () => process.env.AUTH_FLOW_DEBUG === '1';
@@ -70,9 +72,8 @@ const createdAtLocalCalendarYearWhere = (ano) => ({
 });
 
 /**
- * Produção pode estar com schema Prisma adiantado em relação ao banco (ex.: coluna `ativo` em
- * migration local `20260421180000_add_participante_ativo` ainda não aplicada). Não envie esse
- * campo em create/update para evitar erro SQL; não altera regra de negócio.
+ * `Participantes2025` ainda não possui coluna `ativo` no banco (apenas `Participantes2026`).
+ * Remove do payload caso o cliente envie; o Prisma não inclui mais esse campo no model 2025.
  */
 const stripParticipante2025CampoAtivoSeAusenteNoBanco = (obj) => {
   if (!obj || typeof obj !== 'object') return;
@@ -186,19 +187,35 @@ const resolverCamisaPagamento = (inscricao) => {
   };
 };
 
+const PLUS_SIZE_TAMANHOS = new Set(['XXG', 'G1', 'G2']);
+const PLUS_SIZE_ACRESCIMO = 10;
+
+const isPlusSizeTamanhoCamisa = (tamanho) => {
+  const t = String(tamanho || '').trim().toUpperCase();
+  return PLUS_SIZE_TAMANHOS.has(t);
+};
+
 const getCamisaPreco = ({ inscricao, evento }) => {
-  const { wantsShirt, tipoTecido, corNorm } = resolverCamisaPagamento(inscricao);
+  const { wantsShirt, tipoTecido, corNorm, tamanho } = resolverCamisaPagamento(inscricao);
   if (!wantsShirt || !tipoTecido) return 0;
 
   const precoAlgodao = getPrecoCamisaAlgodaoEvento(evento);
   const precoPoliester = getPrecoCamisaPoliesterEvento(evento);
 
   if (tipoTecido === 'poliester') {
-    return precoPoliester;
+    const base = precoPoliester;
+    if (base > 0 && isPlusSizeTamanhoCamisa(tamanho)) {
+      return Number((base + PLUS_SIZE_ACRESCIMO).toFixed(2));
+    }
+    return base;
   }
   if (tipoTecido === 'algodao') {
     if (corNorm === 'branco' || corNorm === 'preto' || corNorm === '') {
-      return precoAlgodao;
+      const base = precoAlgodao;
+      if (base > 0 && isPlusSizeTamanhoCamisa(tamanho)) {
+        return Number((base + PLUS_SIZE_ACRESCIMO).toFixed(2));
+      }
+      return base;
     }
   }
 
@@ -331,6 +348,7 @@ const buildPagamentoDescricaoDetalhada = ({
 
   const tipoNorm = normalizeComparableText(inscricao?.camisaTipo);
   const corNorm = normalizeComparableText(inscricao?.camisaCor);
+  const tam = String(inscricao?.tamanhoCamisa || '').trim();
   const tipoCamisaLabel =
     tipoNorm === 'algodao' ? 'Algodão' : tipoNorm === 'poliester' ? 'Poliéster' : '';
   const corCamisaLabel = corNorm === 'branco' ? 'Branca' : corNorm === 'preto' ? 'Preta' : '';
@@ -342,7 +360,11 @@ const buildPagamentoDescricaoDetalhada = ({
   ];
 
   if (inscricao?.camisa === true && valorCamisa > 0 && tipoCamisaLabel) {
-    lines.push(`Camisa: ${tipoCamisaLabel}${corCamisaLabel ? ` ${corCamisaLabel}` : ''} ${formatMoneyBRL(valorCamisa)}`);
+    const plus = tam && isPlusSizeTamanhoCamisa(tam) ? ' (+R$ 10 plus size)' : '';
+    const tamLabel = tam ? ` tam. ${tam}` : '';
+    lines.push(
+      `Camisa: ${tipoCamisaLabel}${corCamisaLabel ? ` ${corCamisaLabel}` : ''}${tamLabel}${plus} ${formatMoneyBRL(valorCamisa)}`
+    );
   }
 
   lines.push(`Total: ${formatMoneyBRL(total)}`);
@@ -446,6 +468,9 @@ const buildMercadoPagoItems = ({ inscricao, valorInscricao, valorCamisa, regra }
     ];
     if (r.tamanho) {
       camisaLines.push(`Tamanho: ${r.tamanho}`);
+      if (isPlusSizeTamanhoCamisa(r.tamanho)) {
+        camisaLines.push('Plus size: +R$ 10');
+      }
     }
     items.push({
       title: 'Camisa COMEJACA',
@@ -1210,6 +1235,7 @@ const participante = async (req, res) => {
       dadosParticipante.tamanhoCamisa = null;
       dadosParticipante.camisaTipo = null;
       dadosParticipante.camisaCor = null;
+      dadosParticipante.idadeCamisaInfantil = null;
     } else {
       dadosParticipante.tamanhoCamisa =
         String(dadosParticipante.tamanhoCamisa || '').trim() || null;
@@ -1219,6 +1245,14 @@ const participante = async (req, res) => {
       dadosParticipante.camisaCor = isCamisaCorValid(dadosParticipante.camisaCor)
         ? String(dadosParticipante.camisaCor).trim()
         : null;
+    }
+
+    const idadeInfantilErr = validateAndNormalizeIdadeCamisaInfantil(dadosParticipante);
+    if (idadeInfantilErr) {
+      return res.status(400).json({
+        error: 'Dados inválidos',
+        details: [{ message: idadeInfantilErr }],
+      });
     }
 
     const CAMPOS_PAGAMENTO_PROIBIDOS_CREATE = [
@@ -1240,6 +1274,7 @@ const participante = async (req, res) => {
     }
 
     stripParticipante2025CampoAtivoSeAusenteNoBanco(dadosParticipante);
+    stripIdadeCamisaInfantilSeAusenteNoBanco(dadosParticipante);
 
     // Pagamento (valor, link, snapshots MP) só após o usuário usar o botão "Pagar".
     dadosParticipante.valor = null;
@@ -1670,6 +1705,7 @@ const updateInscricao = async (req, res) => {
         prismaUpdateData.tamanhoCamisa = null;
         prismaUpdateData.camisaTipo = null;
         prismaUpdateData.camisaCor = null;
+        prismaUpdateData.idadeCamisaInfantil = null;
       } else {
         const tam = String(prismaUpdateData.tamanhoCamisa ?? '').trim() || null;
         let tipo = String(prismaUpdateData.camisaTipo ?? '').trim() || null;
@@ -1680,7 +1716,7 @@ const updateInscricao = async (req, res) => {
             details: [{ message: 'Informe o tamanho da camisa.' }],
           });
         }
-        const pago = participanteExistente.statusPagamento === 'pago';
+        const pago = isPagamentoPago(participanteExistente.statusPagamento);
         const dbSemTipoCor =
           !String(participanteExistente.camisaTipo || '').trim() &&
           !String(participanteExistente.camisaCor || '').trim();
@@ -1713,6 +1749,17 @@ const updateInscricao = async (req, res) => {
         prismaUpdateData.camisaTipo = tipo;
         prismaUpdateData.camisaCor = cor;
       }
+
+      const idadeInfantilUpdateErr = validateAndNormalizeIdadeCamisaInfantil(
+        prismaUpdateData,
+        { permitirInfantilSemIdade: isPagamentoPago(participanteExistente.statusPagamento) }
+      );
+      if (idadeInfantilUpdateErr) {
+        return res.status(400).json({
+          error: 'Dados inválidos',
+          details: [{ message: idadeInfantilUpdateErr }],
+        });
+      }
     }
 
     const CAMPOS_PAGAMENTO_PROIBIDOS_UPDATE = [
@@ -1734,6 +1781,7 @@ const updateInscricao = async (req, res) => {
     }
 
     stripParticipante2025CampoAtivoSeAusenteNoBanco(prismaUpdateData);
+    stripIdadeCamisaInfantilSeAusenteNoBanco(prismaUpdateData);
 
     console.log('[nomeCracha][back] objeto enviado ao Prisma (data)', {
       nomeCracha: prismaUpdateData.nomeCracha,

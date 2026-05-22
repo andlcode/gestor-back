@@ -137,7 +137,6 @@ model Participante2025 {
   nomeCracha                   String?
   dataPagamento                DateTime?
   statusAutorizacao            String?              @default("pendente")
-  ativo                        Boolean              @default(true)
   camisaTipo                   String?
   camisaCor                    String?
   valorInscricaoPagamento      Int?                 @default(0)
