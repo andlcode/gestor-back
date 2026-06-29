@@ -5,6 +5,7 @@ const { isAuthenticated } = require('../middlewares/authMiddleware.js');
 const { isAdmin } = require('../middlewares/isAdmin.js');
 const { isAdminTotal } = require('../middlewares/isAdminTotal.js');
 const { verifyToken } = require('../middlewares/isVerify.js');
+const { blockRegistrationIfClosed } = require('../middlewares/blockRegistrationIfClosed.js');
 
 const {
   login,
@@ -86,7 +87,7 @@ router.post(
 router.post('/enviarcodigo', isAuthenticated, resendVerificationCode);
 router.post('/validartoken', isAuthenticated, validateToken);
 
-router.post('/inscrever', isAuthenticated, participante);
+router.post('/inscrever', isAuthenticated, blockRegistrationIfClosed, participante);
 router.get('/obterinscricoes', isAuthenticated, getparticipantes);
 router.get('/print/:participanteId', isAuthenticated, obterInscricao);
 

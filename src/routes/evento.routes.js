@@ -5,6 +5,7 @@ const { requireAdminTotal } = require('../middlewares/requireAdminTotal');
 const {
   getEvento,
   getEventoPublicCamisa,
+  getEventoPublicInscricoes,
   updateEvento,
 } = require('../controllers/evento.controller');
 
@@ -16,6 +17,7 @@ router.use((req, res, next) => {
 });
 
 router.get('/public/camisa', getEventoPublicCamisa);
+router.get('/public/inscricoes', getEventoPublicInscricoes);
 router.get('/', isAuthenticated, requireAdminTotal, getEvento);
 router.put('/', isAuthenticated, requireAdminTotal, updateEvento);
 

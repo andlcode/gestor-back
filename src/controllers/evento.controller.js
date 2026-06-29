@@ -1,4 +1,5 @@
 const prisma = require('../prisma');
+const { getActiveEventoRegistrationStatus } = require('../services/registrationStatus');
 
 const EMPTY_EVENT = {
   nome: '',
@@ -17,6 +18,7 @@ const EMPTY_EVENT = {
   valorCamisaPoliester: '',
   camisaImagens: [],
   camisaImagemUrl: '',
+  registrationsOpen: false,
   ativo: true,
   isNew: true,
 };
@@ -54,6 +56,7 @@ const formatEvento = (evento) => {
       evento.valorCamisaPoliester != null ? String(evento.valorCamisaPoliester) : '',
     camisaImagens,
     camisaImagemUrl: camisaImagens[0] || '',
+    registrationsOpen: evento.registrationsOpen === true,
     ativo: Boolean(evento.ativo),
     isNew: false,
   };
@@ -97,6 +100,26 @@ const parseDateField = (value) => {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const parseBooleanField = (value, fallback = false) => {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') {
+    return true;
+  }
+  if (normalized === 'false' || normalized === '0') {
+    return false;
+  }
+
+  return fallback;
 };
 
 const MAX_CAMISA_IMAGENS = 40;
@@ -192,6 +215,28 @@ const getEventoPublicCamisa = async (req, res) => {
   }
 };
 
+/** Status público de abertura das inscrições do evento ativo. */
+const getEventoPublicInscricoes = async (req, res) => {
+  try {
+    const { registrationsOpen } = await getActiveEventoRegistrationStatus();
+
+    return res.status(200).json({
+      success: true,
+      data: { registrationsOpen },
+    });
+  } catch (error) {
+    console.error('[evento] erro ao buscar status das inscrições:', {
+      message: error.message,
+      stack: error.stack,
+    });
+
+    return res.status(500).json({
+      success: false,
+      error: 'Erro ao buscar status das inscrições.',
+    });
+  }
+};
+
 const getEvento = async (req, res) => {
   try {
     console.log('[evento] buscando evento ativo', {
@@ -271,7 +316,11 @@ const updateEvento = async (req, res) => {
     const eventoAtivoAtual = await prisma.evento.findFirst({
       where: { ativo: true },
       orderBy: { updatedAt: 'desc' },
-      select: { valorCamisaAlgodao: true, valorCamisaPoliester: true },
+      select: {
+        valorCamisaAlgodao: true,
+        valorCamisaPoliester: true,
+        registrationsOpen: true,
+      },
     });
 
     const valorCamisaAlgodao = resolveOptionalMoneyField(
@@ -315,6 +364,10 @@ const updateEvento = async (req, res) => {
       valorCamisaAlgodao,
       valorCamisaPoliester,
       camisaImagens: parseCamisaImagens(req.body?.camisaImagens),
+      registrationsOpen: parseBooleanField(
+        req.body?.registrationsOpen,
+        eventoAtivoAtual?.registrationsOpen === true
+      ),
       ativo: true,
     };
     
@@ -363,5 +416,6 @@ const updateEvento = async (req, res) => {
 module.exports = {
   getEvento,
   getEventoPublicCamisa,
+  getEventoPublicInscricoes,
   updateEvento,
 };

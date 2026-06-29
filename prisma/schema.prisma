@@ -83,6 +83,7 @@ model Evento {
   camisaImagens           String[]  @default([])
   valorCamisaAlgodao      Int?      @default(0)
   valorCamisaPoliester    Int?      @default(0)
+  registrationsOpen       Boolean   @default(false)
 
   @@map("Evento")
 }

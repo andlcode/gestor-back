@@ -7,7 +7,8 @@
     "dev": "nodemon src/app.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "test:auth-flow": "node scripts/test-auth-register-login.js"
+    "test:auth-flow": "node scripts/test-auth-register-login.js",
+    "test:registration-closed": "node scripts/test-registration-closed.js"
   },
   "nodemonConfig": {
     "ignore": [
